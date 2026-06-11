@@ -3,7 +3,7 @@ from __future__ import annotations
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from latest_ai_development.components.llm.model_settings import (
+from latest_ai_development.llm.model_settings import (
     ModelSettings,
     get_model_settings,
 )

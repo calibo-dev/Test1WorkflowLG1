@@ -1,25 +1,27 @@
 from __future__ import annotations
 
 import os
-import yaml
 from dataclasses import dataclass, field
 from typing import Any, Dict
+
+from dotenv import load_dotenv
+
 from latest_ai_development.secrets_manager import SecretsManager
 
-_CONFIG_PATH = "src/latest_ai_development/config/models.yaml"
+
+# --------------------------------------------------
+# LOAD .env FILE (IMPORTANT)
+# --------------------------------------------------
+
+load_dotenv()
 
 
-def _load_config() -> Dict[str, Any]:
-    with open(_CONFIG_PATH, "r") as f:
-        return yaml.safe_load(f)
-
+# --------------------------------------------------
+# MODEL SETTINGS
+# --------------------------------------------------
 
 @dataclass(frozen=True)
 class ModelSettings:
-    """
-    Fully resolved LLM configuration.
-    All values originate from models.yaml and env vars — no defaults in code.
-    """
     provider: str
     model: str
     temperature: float
@@ -28,75 +30,100 @@ class ModelSettings:
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
-def get_model_settings(provider_name:str) -> ModelSettings:
-    """
-    Resolves ModelSettings entirely from PROVIDER env var + models.yaml.
-    No step concept — provider block is the single source of truth.
+# --------------------------------------------------
+# MAIN CONFIG
+# --------------------------------------------------
 
-    IMPORTANT FOR AI / FUTURE EDITS:
-    - PROVIDER env var drives everything.
-    - Each provider block in models.yaml must have: model, temperature, top_p, max_tokens.
-    - Do not add Python-level fallbacks here.
-    """
-    config = _load_config()
+def get_model_settings(provider_name: str) -> ModelSettings:
 
     if not provider_name:
-        raise ValueError("PROVIDER env var is not set.")
+        raise ValueError("provider_name is required")
+
     provider_name = provider_name.lower()
 
-    provider_cfg = config.get("providers", {}).get(provider_name)
-    if provider_cfg is None:
+    secrets_manager = SecretsManager()
+
+    # --------------------------------------------------
+    # DEFAULTS (NO YAML)
+    # --------------------------------------------------
+
+    defaults = {
+        "openai": {
+            "model": "gpt-4o-mini",
+            "temperature": 0.3,
+            "top_p": 1.0,
+            "max_tokens": 2000,
+            "secret_env": "OPENAI_API_KEY_SECRET",
+        },
+
+        "aws": {
+            "model": "gpt-4o-mini",
+            "temperature": 0.3,
+            "top_p": 1.0,
+            "max_tokens": 2000,
+            "secret_env": "OPENAI_API_KEY_SECRET",
+            "region_env": "AWS_REGION",
+        },
+
+        "ollama": {
+            "model": "llama3",
+            "temperature": 0.3,
+            "top_p": 1.0,
+            "max_tokens": 2000,
+            "base_url_env": "OLLAMA_BASE_URL",
+        },
+    }
+
+    if provider_name not in defaults:
         raise ValueError(
-            f"Provider '{provider_name}' not found in models.yaml. "
-            f"Available: {list(config.get('providers', {}).keys())}"
+            f"Unknown provider '{provider_name}'. "
+            f"Supported: {list(defaults.keys())}"
         )
 
-    def require(key: str) -> Any:
-        value = provider_cfg.get(key)
-        if value is None:
-            raise ValueError(
-                f"'{key}' is not set for provider '{provider_name}' in models.yaml."
-            )
-        return value
+    cfg = defaults[provider_name]
+    extra: Dict[str, Any] = {}
 
-    extra = _resolve_provider_extras(provider_name, provider_cfg)
+    # --------------------------------------------------
+    # OPENAI
+    # --------------------------------------------------
+
+    if provider_name == "openai":
+        secret_name = os.getenv(cfg["secret_env"])
+        if secret_name:
+            extra["api_key"] = secrets_manager.get_secret(secret_name)
+
+    # --------------------------------------------------
+    # AWS (Secrets Manager)
+    # --------------------------------------------------
+
+    elif provider_name == "aws":
+        secret_name = os.getenv(cfg["secret_env"])
+        region = os.getenv(cfg["region_env"], "us-east-1")
+
+        if secret_name:
+            extra["api_key"] = secrets_manager.get_secret(secret_name)
+
+        extra["region"] = region
+
+    # --------------------------------------------------
+    # OLLAMA
+    # --------------------------------------------------
+
+    elif provider_name == "ollama":
+        extra["base_url"] = os.getenv(
+            cfg["base_url_env"],
+            "http://localhost:11434"
+        )
+
+    # --------------------------------------------------
+    # RETURN
+    # --------------------------------------------------
 
     return ModelSettings(
         provider=provider_name,
-        model=require("model"),
-        temperature=float(require("temperature")),
-        top_p=float(require("top_p")),
-        max_tokens=int(require("max_tokens")),
+        model=cfg["model"],
+        temperature=cfg["temperature"],
+        top_p=cfg["top_p"],
+        max_tokens=cfg["max_tokens"],
         extra=extra,
     )
-
-
-def _resolve_provider_extras(
-    provider_name: str,
-    provider_cfg: Dict[str, Any],
-) -> Dict[str, Any]:
-    """
-    Resolve provider-specific runtime values from env vars.
-    Env var names and fallback values come entirely from models.yaml.
-    """
-    extras: Dict[str, Any] = {}
-    secrets_manager = SecretsManager()
-
-    if api_key_env := provider_cfg.get("api_key_env"):
-        extras["api_key"] = secrets_manager.get_secret(os.getenv(api_key_env))
-
-
-    if provider_name == "azure":
-        extras["azure_endpoint"] = os.getenv(
-            provider_cfg["azure_endpoint_env"],
-            provider_cfg.get("azure_endpoint_default"),
-        )
-        extras["api_version"] = os.getenv(
-            provider_cfg["api_version_env"],
-            provider_cfg.get("api_version_default"),
-        )
-
-    if provider_name == "ollama":
-        extras["base_url"] = os.getenv(provider_cfg["base_url_env"])
-
-    return extras

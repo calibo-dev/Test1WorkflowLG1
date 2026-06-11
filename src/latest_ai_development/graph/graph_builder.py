@@ -1,8 +1,7 @@
 from langgraph.graph import StateGraph, END
-
-from state import GraphState
-from nodes.research_node_builder import ResearchNodeBuilder
-from nodes.reporting_noder_builder import ReportingNodeBuilder
+from latest_ai_development.graph.state import GraphState
+from latest_ai_development.nodes.research_node_builder import ResearchNodeBuilder
+from latest_ai_development.nodes.reporting_noder_builder import ReportingNodeBuilder
 
 
 class GraphBuilder:
