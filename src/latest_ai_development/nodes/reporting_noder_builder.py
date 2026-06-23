@@ -1,28 +1,57 @@
 from __future__ import annotations
 
-from langchain_core.output_parsers import StrOutputParser
+import logging
+from langchain.agents import create_agent
 
 from latest_ai_development.llm.llm_factory import LLMFactory
 from latest_ai_development.prompts.prompt_builder import build_reporting_prompt
+
+logger = logging.getLogger(__name__)
 
 
 class ReportingNodeBuilder:
 
     @staticmethod
     def build():
-        prompt = build_reporting_prompt()
-
+        logger.info("Building Reporting Node...")
+        
+        logger.info("Creating LLM for Reporting Node...")
         llm = LLMFactory().create_llm(provider="openai")
 
-        chain = prompt | llm | StrOutputParser()
+        logger.info("Building Reporting Prompt...")
+        prompt = build_reporting_prompt()
+
+        logger.info("Creating Reporting Agent...")
+        agent = create_agent(
+            model=llm,
+            tools=[],
+            system_prompt=prompt,
+        )
 
         def reporting_node(state: dict) -> dict:
-            report = chain.invoke(
+            logger.info(f"Reporting Node received query: {state.get('query')}")
+
+            result = agent.invoke(
                 {
-                    "query": state["query"],
-                    "research_result": state["research_result"],
+                    "messages": [
+                        (
+                            "user",
+                            f"""
+Query:
+{state['query']}
+
+Research Result:
+{state['research_result']}
+""",
+                        )
+                    ]
                 }
             )
+
+            report = result["messages"][-1].content
+
+            logger.info("Reporting Node completed successfully")
+            logger.debug(f"Generated Report: {report}")
 
             return {
                 **state,

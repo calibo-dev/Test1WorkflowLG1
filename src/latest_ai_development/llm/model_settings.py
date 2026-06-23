@@ -43,9 +43,6 @@ def get_model_settings(provider_name: str) -> ModelSettings:
 
     secrets_manager = SecretsManager()
 
-    # --------------------------------------------------
-    # DEFAULTS (NO YAML)
-    # --------------------------------------------------
 
     defaults = {
         "openai": {

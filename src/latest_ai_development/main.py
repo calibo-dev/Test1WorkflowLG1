@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+
 import sys
 from datetime import datetime
 from typing import Any, Dict
@@ -10,6 +13,29 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from latest_ai_development.graph.graph_builder import GraphBuilder
+from dotenv import load_dotenv
+load_dotenv()
+
+
+
+logging.basicConfig(
+    filename="pipeline.log",
+    level=logging.INFO,
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+    filemode="a",
+)
+
+
+
+# Optional validation
+if not os.getenv("LANGSMITH_API_KEY"):
+    raise RuntimeError("LANGSMITH_API_KEY not found")
+
+# --------------------------------------------------
+# LangSmith Tracing
+# --------------------------------------------------
+
+os.environ["LANGSMITH_TRACING"] = "true"
 
 
 # --------------------------------------------------
