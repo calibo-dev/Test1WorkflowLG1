@@ -1,16 +1,20 @@
 [project]
 name = "latest-ai-development"
 version = "0.1.0"
-description = "LangChain workflow template for automated research and report generation"
+description = "LangGraph workflow template for automated research and report generation"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 
 dependencies = [
+  "azure-identity>=1.25.1",
+  "azure-keyvault-secrets>=4.10.0",
+  "langgraph>=0.4.8",
   "langchain>=0.3.20",
   "langchain-core>=0.3.40",
   "langchain-openai>=0.3.8",
   "langchain-community>=0.3.19",
   "langchain-ollama>=0.2.3",
+  "langsmith>=0.8.5",
 
   "fastapi>=0.115.8",
   "uvicorn>=0.34.0",
@@ -39,14 +43,8 @@ dev = [
   "mypy>=1.15.0"
 ]
 
-observability = [
-  "langsmith>=0.1.0"
-]
-
 [project.scripts]
 latest_ai_development = "latest_ai_development.main:run"
-train = "latest_ai_development.main:train"
-replay = "latest_ai_development.main:replay"
 test = "latest_ai_development.main:test"
 run_with_trigger = "latest_ai_development.main:run_with_trigger"
 

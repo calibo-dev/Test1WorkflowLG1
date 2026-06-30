@@ -2,45 +2,46 @@
 
 ## Overview
 
-This template implements a **FastAPI-based LangChain workflow** for automated topic research and report generation.
+This template implements a **FastAPI-based LangGraph workflow** for automated topic research and report generation.
 
 ### Purpose
 Execute a structured workflow that researches a topic and produces a markdown report.
 
 ### Workflow Pattern
-Sequential workflow with explicit stage handoff.
+Sequential graph workflow with explicit node handoff.
 
 ### Core Stages
 
-- **Research Stage**
+- **Research Node**
   - gathers topic information
   - optionally invokes tools or retrieval
   - produces structured research notes
 
-- **Reporting Stage**
+- **Reporting Node**
   - converts research notes into a formatted markdown report
 
 ### Execution Model
 
-A workflow controller orchestrates stage execution and passes structured outputs between stages.
+A LangGraph workflow orchestrates node execution and passes shared state between nodes.
 
 ### Output
 
-Final report written to:
+Final report returned from the workflow response state:
 
-`report.md`
+- `report`
 
 ## Architecture
 
-The system uses **FastAPI** and **LangChain Runnable pipelines** to implement deterministic workflow execution.
+The system uses **FastAPI** and **LangGraph** to implement deterministic workflow execution.
 
 ### High-Level Flow
 
-Client → FastAPI → Workflow Controller → Research Stage → Reporting Stage → Markdown Report
+Client → FastAPI → LangGraph Workflow → Research Node → Reporting Node → Markdown Report
 
 ### Framework
 
 - FastAPI
+- LangGraph
 - LangChain
 
 ### LLM Provider Selection
@@ -62,33 +63,24 @@ Location:
 
 The factory resolves provider configuration and returns the correct chat model.
 
-### Chain Construction
+### Graph Construction
 
-LLM pipelines are constructed using a **Chain Builder pattern**.
+The workflow is constructed through a graph builder.
 
 Location:
 
-`src/latest_ai_development/chains/`
+`src/latest_ai_development/graph/graph_builder.py`
 
-Examples:
+Node functions are created by:
 
-- `research_chain_builder.py`
-- `reporting_chain_builder.py`
+- `src/latest_ai_development/nodes/research_node_builder.py`
+- `src/latest_ai_development/nodes/reporting_node_builder.py`
 
-Chain builders assemble LangChain Runnable pipelines combining:
+## Workflow Nodes
 
-- prompts
-- models
-- tools
-- output parsers
+The workflow contains two sequential nodes.
 
-Stages call these builders rather than constructing pipelines directly.
-
-## Workflow Stages
-
-The workflow contains two sequential stages.
-
-### Research Stage
+### Research Node
 
 Purpose  
 Collect relevant information for the requested topic.
@@ -114,7 +106,7 @@ Structured research notes including:
 - suggested report structure
 
 
-### Reporting Stage
+### Reporting Node
 
 Purpose  
 Convert research notes into a structured markdown report.
@@ -129,78 +121,43 @@ Prompt → LLM → Output Parser
 
 Output
 
-Final markdown report written to `report.md`.
+Final markdown report returned in the shared state under `report`.
 
 ## Workflow Execution
 
-The workflow executes stages sequentially.
+The workflow executes nodes sequentially.
 
 ### Execution Order
 
-1. Research Stage  
-2. Reporting Stage
+1. Research Node  
+2. Reporting Node
 
-### Workflow Controller
+### Workflow Builder
 
-`LatestAiDevelopmentWorkflow`
+`GraphBuilder`
 
 Location
 
-`src/latest_ai_development/workflow.py`
+`src/latest_ai_development/graph/graph_builder.py`
 
-### Stage Interface
+### Node Interface
 
-Each stage implements:
+Each node function implements:
 
-run(inputs: dict) → dict
+`run(state: dict) -> dict`
 
-The research stage output becomes the input for the reporting stage.
+The research node output becomes part of the shared state consumed by the reporting node.
 
 ## Configuration Files
 
 Runtime behavior is configured using YAML files.
 
-### stages.yaml
+Runtime behavior in this template is primarily configured through environment variables
+and the Python modules under:
 
-Location  
-`src/latest_ai_development/config/stages.yaml`
-
-Purpose  
-Defines stage prompts and execution instructions.
-
----
-
-### workflow.yaml
-
-Location  
-`src/latest_ai_development/config/workflow.yaml`
-
-Purpose  
-Defines stage order and workflow configuration.
-
----
-
-### models.yaml
-
-Location  
-`src/latest_ai_development/config/models.yaml`
-
-Purpose  
-Defines model settings such as:
-
-- model name
-- temperature
-- token limits
-
----
-
-### settings.py
-
-Location  
-`src/latest_ai_development/config/settings.py`
-
-Purpose  
-Loads runtime configuration from environment variables.
+- `src/latest_ai_development/llm/`
+- `src/latest_ai_development/prompts/`
+- `src/latest_ai_development/graph/`
 
 ## Usage
 
@@ -211,22 +168,23 @@ The workflow can be executed through multiple interfaces.
 ### Direct Execution
 
 ```python
-from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
-from datetime import datetime
+from latest_ai_development.graph.graph_builder import GraphBuilder
 
-inputs = {
-    "topic": "Your Topic Here",
-    "current_year": int(datetime.now().year),
-    "save_output": True
-}
-
-LatestAiDevelopmentWorkflow().kickoff(inputs=inputs)
+graph = GraphBuilder.build()
+result = graph.invoke(
+    {
+        "query": "Your Topic Here",
+        "research_result": "",
+        "report": "",
+    }
+)
+print(result["report"])
 ```
 #### 2. FastAPI Endpoint
 ```bash
 POST /ask
 {
-  "topic": "Your Topic Here"
+  "query": "Your Topic Here"
 }
 ```
 #### 3. Command Line
@@ -234,17 +192,11 @@ POST /ask
 # Run the workflow
 latest_ai_development
 
-# Train-style repeated execution
-train <n_iterations> <filename>
-
-# Replay from payload file or topic
-replay <task_id>
-
 # Test the workflow
-test <n_iterations> <eval_llm>
+test
 
 # Run with trigger payload
-run_with_trigger '<json_payload>'
+run_with_trigger '{"query":"Your Topic Here"}'
 ```
 
 ## Environment Variables
@@ -281,9 +233,8 @@ The system uses environment variables to resolve runtime configuration.
 - **`CONTEXT`**
   - **Purpose**: Specifies the path for context, knowledge, or input files used by the workflow
 
-- **`REPORT_OUTPUT_FILE`**
-  - **Purpose**: Specifies the output filename for the final markdown report
-  - **Default**: `report.md`
+- **`LANGSMITH_PROJECT`**
+  - **Purpose**: Specifies the LangSmith project name used for tracing
 
 ## Integration Features
 
@@ -319,7 +270,7 @@ The system includes integration points for API execution, secret resolution, and
     - allows tools to be attached to LLM pipelines using `bind_tools()`
     - enables the LLM to dynamically decide when a tool should be invoked
     - supports modular tool implementations that can be reused across stages
-    - allows tools to be attached to the research stage or future stages without modifying the workflow controller
+    - allows tools to be attached to the research node or future nodes without modifying the graph builder
 
   - **Execution Model**:
     Tools are attached to the LLM during pipeline construction.
@@ -352,13 +303,13 @@ def search_tool(query: str) -> str:
 The workflow produces a final markdown report as its primary output.
 
 - **Output File**:
-  - `report.md`
+  - `/data/report.md`
 
 - **Output Type**:
-  - Markdown document
+  - Markdown file written at runtime
 
 - **Generated By**:
-  - The reporting stage
+  - The reporting node
 
 - **Typical Content**:
   - topic summary
@@ -369,8 +320,8 @@ The workflow produces a final markdown report as its primary output.
 
 - **Behavior**:
   - The final report is generated after successful completion of all workflow stages
-  - Output persistence is controlled by workflow configuration and runtime settings
-  - The output path can be overridden through configuration when needed
+  - The final markdown is still available in the workflow state under `report`
+  - The markdown file is written to `/data/report.md`
 
 ## Deployment
 

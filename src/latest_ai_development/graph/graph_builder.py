@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
-from latest_ai_development.graph.state import GraphState
+from latest_ai_development.graph.state import State
 from latest_ai_development.nodes.research_node_builder import ResearchNodeBuilder
-from latest_ai_development.nodes.reporting_noder_builder import ReportingNodeBuilder
+from latest_ai_development.nodes.reporting_node_builder import ReportingNodeBuilder
 
 
 class GraphBuilder:
@@ -9,7 +9,7 @@ class GraphBuilder:
     @staticmethod
     def build():
 
-        workflow = StateGraph(GraphState)
+        workflow = StateGraph(State)
 
         research_node = ResearchNodeBuilder.build()
         reporting_node = ReportingNodeBuilder.build()

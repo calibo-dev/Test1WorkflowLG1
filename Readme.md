@@ -140,6 +140,8 @@ Defines:
 - Agent communication state
 - Intermediate results
 
+The template uses a `State` `TypedDict` as the primary LangGraph state model.
+
 ---
 
 ### LLM Factory
@@ -184,6 +186,7 @@ Responsible for:
 - Generating markdown reports
 - Formatting final output
 - Creating human-readable responses
+- Writing the final markdown report to `/data/report.md`
 
 ---
 
@@ -212,6 +215,41 @@ Provides secure access to:
 - External service tokens
 
 AWS Secrets Manager integration is supported.
+
+Current template behavior:
+
+- `CLOUD_PROVIDER=AWS` uses AWS Secrets Manager
+- `CLOUD_PROVIDER=AZURE` uses Azure Key Vault
+- empty/unset `CLOUD_PROVIDER` is treated as local-development mode
+
+Local-development mode:
+
+- secret-related environment variables are treated as direct values
+- this allows local runs without external secret-manager dependencies
+
+Typical API key configuration:
+
+- OpenAI:
+  - direct value: `OPENAI_API_KEY`
+  - secret reference: `API_KEY_SECRET` or `OPENAI_API_KEY_SECRET`
+- Azure OpenAI:
+  - direct value: `AZURE_OPENAI_API_KEY`
+  - secret reference: `API_KEY_SECRET` or `AZURE_OPENAI_API_KEY_SECRET`
+  - endpoint: `AZURE_OPENAI_ENDPOINT` or `AZUREAI_OPENAI_URL`
+  - API version: `AZURE_OPENAI_API_VERSION` or `AZUREAI_OPENAI_API_VERSION`
+
+### Observability and Tracing
+
+- LangSmith tracing is required for this template
+- the template enables LangSmith during FastAPI app startup
+- if LangSmith credentials are missing, startup fails
+
+LangSmith configuration:
+
+- API key can come from:
+  - `LANGSMITH_API_KEY`
+  - `LANGSMITH_API_KEY_SECRET`
+- project name can be provided with `LANGSMITH_PROJECT`
 
 ---
 

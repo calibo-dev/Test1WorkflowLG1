@@ -34,6 +34,32 @@ class ModelSettings:
 # MAIN CONFIG
 # --------------------------------------------------
 
+
+def _resolve_api_key(
+    *,
+    secrets_manager: SecretsManager,
+    direct_env_names: list[str],
+    secret_env_names: list[str],
+) -> str | None:
+    """
+    Resolve an API key using the following priority:
+
+    1. Direct value from a plain environment variable
+    2. Secret reference resolved through SecretsManager
+    """
+    for env_name in direct_env_names:
+        value = os.getenv(env_name)
+        if value:
+            return value
+
+    for env_name in secret_env_names:
+        secret_name = os.getenv(env_name)
+        if secret_name:
+            return secrets_manager.get_secret(secret_name)
+
+    return None
+
+
 def get_model_settings(provider_name: str) -> ModelSettings:
 
     if not provider_name:
@@ -50,16 +76,19 @@ def get_model_settings(provider_name: str) -> ModelSettings:
             "temperature": 0.3,
             "top_p": 1.0,
             "max_tokens": 2000,
-            "secret_env": "OPENAI_API_KEY_SECRET",
+            "direct_api_key_envs": ["OPENAI_API_KEY"],
+            "secret_envs": ["API_KEY_SECRET", "OPENAI_API_KEY_SECRET"],
         },
 
-        "aws": {
+        "azure_openai": {
             "model": "gpt-4o-mini",
             "temperature": 0.3,
             "top_p": 1.0,
             "max_tokens": 2000,
-            "secret_env": "OPENAI_API_KEY_SECRET",
-            "region_env": "AWS_REGION",
+            "direct_api_key_envs": ["AZURE_OPENAI_API_KEY"],
+            "secret_envs": ["API_KEY_SECRET", "AZURE_OPENAI_API_KEY_SECRET"],
+            "endpoint_envs": ["AZURE_OPENAI_ENDPOINT", "AZUREAI_OPENAI_URL"],
+            "api_version_envs": ["AZURE_OPENAI_API_VERSION", "AZUREAI_OPENAI_API_VERSION"],
         },
 
         "ollama": {
@@ -85,22 +114,38 @@ def get_model_settings(provider_name: str) -> ModelSettings:
     # --------------------------------------------------
 
     if provider_name == "openai":
-        secret_name = os.getenv(cfg["secret_env"])
-        if secret_name:
-            extra["api_key"] = secrets_manager.get_secret(secret_name)
+        api_key = _resolve_api_key(
+            secrets_manager=secrets_manager,
+            direct_env_names=cfg["direct_api_key_envs"],
+            secret_env_names=cfg["secret_envs"],
+        )
+        if api_key:
+            extra["api_key"] = api_key
 
     # --------------------------------------------------
-    # AWS (Secrets Manager)
+    # AZURE OPENAI
     # --------------------------------------------------
 
-    elif provider_name == "aws":
-        secret_name = os.getenv(cfg["secret_env"])
-        region = os.getenv(cfg["region_env"], "us-east-1")
+    elif provider_name == "azure_openai":
+        api_key = _resolve_api_key(
+            secrets_manager=secrets_manager,
+            direct_env_names=cfg["direct_api_key_envs"],
+            secret_env_names=cfg["secret_envs"],
+        )
+        if api_key:
+            extra["api_key"] = api_key
 
-        if secret_name:
-            extra["api_key"] = secrets_manager.get_secret(secret_name)
+        for env_name in cfg["endpoint_envs"]:
+            endpoint = os.getenv(env_name)
+            if endpoint:
+                extra["azure_endpoint"] = endpoint
+                break
 
-        extra["region"] = region
+        for env_name in cfg["api_version_envs"]:
+            api_version = os.getenv(env_name)
+            if api_version:
+                extra["api_version"] = api_version
+                break
 
     # --------------------------------------------------
     # OLLAMA
