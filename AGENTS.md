@@ -8,7 +8,7 @@ This template implements a **FastAPI-based LangGraph workflow** for automated to
 Execute a structured workflow that researches a topic and produces a markdown report.
 
 ### Workflow Pattern
-Sequential graph workflow with explicit node handoff.
+Graph workflow with orchestration nodes, shared state, and conditional routing.
 
 ### Core Stages
 
@@ -36,7 +36,7 @@ The system uses **FastAPI** and **LangGraph** to implement deterministic workflo
 
 ### High-Level Flow
 
-Client → FastAPI → LangGraph Workflow → Research Node → Reporting Node → Markdown Report
+Client → FastAPI → Validate Input → Router Agent → Research Node → Reporting Node → Finalize Output → Markdown Report
 
 ### Framework
 
@@ -78,7 +78,25 @@ Node functions are created by:
 
 ## Workflow Nodes
 
-The workflow contains two sequential nodes.
+The workflow contains orchestration nodes plus the current template-defined agents.
+
+### Router Agent
+
+Purpose  
+Determine the internal execution plan for the workflow agents.
+
+Inputs
+
+- topic
+- current state
+
+Execution Pipeline
+
+Prompt → LLM → Agent Plan
+
+Output
+
+Internal `agent_plan` used for downstream routing.
 
 ### Research Node
 
@@ -125,12 +143,15 @@ Final markdown report returned in the shared state under `report`.
 
 ## Workflow Execution
 
-The workflow executes nodes sequentially.
+The workflow executes through orchestration and agent nodes.
 
 ### Execution Order
 
-1. Research Node  
-2. Reporting Node
+1. Validate Input
+2. Router Agent
+3. Research Node  
+4. Reporting Node
+5. Finalize Output
 
 ### Workflow Builder
 
@@ -144,7 +165,7 @@ Location
 
 Each node function implements:
 
-`run(state: dict) -> dict`
+`run(state: State) -> dict`
 
 The research node output becomes part of the shared state consumed by the reporting node.
 
@@ -168,23 +189,17 @@ The workflow can be executed through multiple interfaces.
 ### Direct Execution
 
 ```python
-from latest_ai_development.graph.graph_builder import GraphBuilder
+from latest_ai_development.main import _build_initial_state, get_graph
 
-graph = GraphBuilder.build()
-result = graph.invoke(
-    {
-        "query": "Your Topic Here",
-        "research_result": "",
-        "report": "",
-    }
-)
+graph = get_graph()
+result = graph.invoke(_build_initial_state(topic="Your Topic Here"))
 print(result["report"])
 ```
 #### 2. FastAPI Endpoint
 ```bash
 POST /ask
 {
-  "query": "Your Topic Here"
+  "topic": "Your Topic Here"
 }
 ```
 #### 3. Command Line
@@ -196,7 +211,7 @@ latest_ai_development
 test
 
 # Run with trigger payload
-run_with_trigger '{"query":"Your Topic Here"}'
+run_with_trigger '{"topic":"Your Topic Here"}'
 ```
 
 ## Environment Variables

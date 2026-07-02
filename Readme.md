@@ -27,10 +27,10 @@ The project uses **LangGraph** for orchestration and provides a modular architec
 
 ## 2. Architecture
 
-The system follows a graph-based multi-agent workflow.
+The system follows a graph-based workflow with orchestration nodes and template-defined agents.
 
 ```text
-                 User Query
+                    Topic
                       |
                       v
 
@@ -38,15 +38,20 @@ The system follows a graph-based multi-agent workflow.
             | Graph Builder  |
             +----------------+
                       |
-          -------------------------
-          |                       |
-          v                       v
-
- +----------------+     +----------------+
- | Research Node  | --> | Reporting Node |
- +----------------+     +----------------+
-          |                       |
-          -------------------------
+                      v
+        +---------------------------+
+        | Validate Input            |
+        +---------------------------+
+                      |
+                      v
+        +---------------------------+
+        | Router Agent              |
+        +---------------------------+
+                      |
+                      v
+ +----------------+     +----------------+     +------------------+
+ | Research Node  | --> | Reporting Node | --> | Finalize Output  |
+ +----------------+     +----------------+     +------------------+
                       |
                       v
 
@@ -126,6 +131,7 @@ Responsible for:
 - Defining node transitions
 - Managing graph execution flow
 - Routing state between agents
+- Wiring orchestration nodes, the router agent, and conditional edges
 
 ---
 
@@ -139,6 +145,19 @@ Defines:
 - Input and output schema
 - Agent communication state
 - Intermediate results
+- Internal agent plan and validation errors
+
+Current minimal external request:
+
+- `topic`
+
+Current internal state includes:
+
+- `topic`
+- `agent_plan`
+- `errors`
+- `research_result`
+- `report`
 
 The template uses a `State` `TypedDict` as the primary LangGraph state model.
 

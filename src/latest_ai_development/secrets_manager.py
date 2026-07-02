@@ -4,6 +4,7 @@ import json
 import os
 
 import boto3
+from boto3.session import Session
 from botocore.exceptions import ClientError
 
 
@@ -15,7 +16,7 @@ class AWSSecretsManager:
         defaulting to 'us-east-1' if not set.
         """
         region_name = os.environ.get("AWS_REGION", "us-east-1")
-        self.session = boto3.session.Session()
+        self.session: Session = Session()
         self.client = self.session.client(
             service_name="secretsmanager",
             region_name=region_name,

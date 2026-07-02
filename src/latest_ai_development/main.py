@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from latest_ai_development.graph.graph_builder import GraphBuilder
+from latest_ai_development.graph.state import State
 from latest_ai_development.tracking import initialize_langsmith_tracing
 
 load_dotenv()
@@ -83,16 +84,30 @@ app = FastAPI(
 
 
 # --------------------------------------------------
-# Request / Response Models
-# --------------------------------------------------
-
 class AskRequest(BaseModel):
-    query: str
+    topic: str
 
 
 class AskResponse(BaseModel):
-    query: str
+    topic: str
     report: str
+
+
+def _build_initial_state(
+    *,
+    topic: str,
+) -> State:
+    return {
+        "topic": topic,
+        "agent_plan": [],
+        "errors": [],
+        "research_result": "",
+        "report": "",
+    }
+
+
+def _invoke_workflow(*, topic: str) -> State:
+    return get_graph().invoke(_build_initial_state(topic=topic))
 
 
 # --------------------------------------------------
@@ -115,22 +130,16 @@ async def health() -> Dict[str, Any]:
 async def ask(request: AskRequest):
 
     try:
-        result = get_graph().invoke(
-            {
-                "query": request.query,
-                "research_result": "",
-                "report": "",
-            }
-        )
+        result = _invoke_workflow(topic=request.topic)
 
         return AskResponse(
-            query=request.query,
+            topic=request.topic,
             report=result["report"],
         )
 
     except Exception as e:
         return AskResponse(
-            query=request.query,
+            topic=request.topic,
             report=f"Error: {str(e)}",
         )
 
@@ -141,13 +150,7 @@ async def ask(request: AskRequest):
 
 def test():
 
-    result = get_graph().invoke(
-        {
-            "query": "Latest AI Agent Frameworks",
-            "research_result": "",
-            "report": "",
-        }
-    )
+    result = _invoke_workflow(topic="Latest AI Agent Frameworks")
 
     print(result["report"])
 
@@ -163,13 +166,7 @@ def run_with_trigger():
 
     payload = json.loads(sys.argv[1])
 
-    result = get_graph().invoke(
-        {
-            "query": payload["query"],
-            "research_result": "",
-            "report": "",
-        }
-    )
+    result = _invoke_workflow(topic=payload["topic"])
 
     print(result)
 

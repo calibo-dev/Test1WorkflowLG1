@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+import json
+import logging
+import os
+from collections.abc import Callable
+from typing import Any
+
+from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
+
+from latest_ai_development.graph.state import State
+from latest_ai_development.llm.llm_factory import LLMFactory
+from latest_ai_development.prompts.prompt_builder import build_router_prompt
+
+
+logger = logging.getLogger(__name__)
+
+
+class OrchestrationNodeBuilder:
+    @staticmethod
+    def _default_agent_plan() -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "research",
+                "enabled": True,
+                "role": "Research agent",
+            },
+            {
+                "id": "reporting",
+                "enabled": True,
+                "role": "Reporting agent",
+            },
+        ]
+
+    @staticmethod
+    def _normalize_agent_plan(raw_agent_plan: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw_agent_plan, list):
+            return OrchestrationNodeBuilder._default_agent_plan()
+
+        normalized_agent_plan: list[dict[str, Any]] = []
+        for raw_agent in raw_agent_plan:
+            if not isinstance(raw_agent, dict):
+                continue
+
+            agent_id = raw_agent.get("id")
+            if agent_id not in {"research", "reporting"}:
+                continue
+
+            normalized_agent_plan.append(
+                {
+                    "id": agent_id,
+                    "enabled": bool(raw_agent.get("enabled", True)),
+                    "role": str(raw_agent.get("role", "") or ""),
+                }
+            )
+
+        if not normalized_agent_plan:
+            return OrchestrationNodeBuilder._default_agent_plan()
+
+        return normalized_agent_plan
+
+    @staticmethod
+    def _parse_router_result(raw_result: Any) -> list[dict[str, Any]]:
+        if isinstance(raw_result, dict) and "messages" in raw_result:
+            content = raw_result["messages"][-1].content
+        else:
+            content = getattr(raw_result, "content", str(raw_result))
+
+        if not isinstance(content, str):
+            return OrchestrationNodeBuilder._default_agent_plan()
+
+        normalized_content = content.strip()
+        if normalized_content.startswith("```"):
+            normalized_content = normalized_content.strip("`")
+            if normalized_content.startswith("json"):
+                normalized_content = normalized_content[4:].strip()
+
+        try:
+            parsed = json.loads(normalized_content)
+        except json.JSONDecodeError:
+            return OrchestrationNodeBuilder._default_agent_plan()
+
+        return OrchestrationNodeBuilder._normalize_agent_plan(parsed.get("agent_plan"))
+
+    @staticmethod
+    def route_after_router_agent(state: State) -> str:
+        if state.get("errors"):
+            return "finalize_output"
+
+        enabled_agents = {
+            agent.get("id")
+            for agent in state.get("agent_plan", [])
+            if agent.get("enabled", True)
+        }
+
+        if "research" in enabled_agents:
+            return "research"
+
+        if "reporting" in enabled_agents:
+            return "reporting"
+
+        return "finalize_output"
+
+    @staticmethod
+    def route_after_research(state: State) -> str:
+        if state.get("errors"):
+            return "finalize_output"
+
+        enabled_agents = {
+            agent.get("id")
+            for agent in state.get("agent_plan", [])
+            if agent.get("enabled", True)
+        }
+
+        if "reporting" in enabled_agents:
+            return "reporting"
+
+        return "finalize_output"
+
+    @staticmethod
+    def build_validate_input() -> Callable[[State], dict[str, Any]]:
+
+        def validate_input_node(state: State, /) -> dict[str, Any]:
+            logger.info("Validate Input node started")
+
+            topic = state.get("topic", "")
+            errors = list(state.get("errors", []))
+
+            if not isinstance(topic, str) or not topic.strip():
+                errors.append("topic is required")
+
+            logger.info("Validate Input node completed with %s error(s)", len(errors))
+
+            return {
+                **state,
+                "errors": errors,
+            }
+
+        return validate_input_node
+
+    @staticmethod
+    def build_router_agent() -> Callable[[State], dict[str, Any]]:
+        logger.info("Building Router Agent Node...")
+        provider = os.getenv("PROVIDER", "ollama").lower()
+
+        logger.info("Creating LLM for Router Agent with provider=%s...", provider)
+        llm = LLMFactory().create_llm(provider=provider)
+
+        logger.info("Building Router Prompt...")
+        system_prompt = build_router_prompt()
+
+        logger.info("Creating Router Agent...")
+        agent = create_agent(
+            model=llm,
+            tools=[],
+            system_prompt=system_prompt,
+        )
+
+        def router_agent_node(state: State, /) -> dict[str, Any]:
+            logger.info("Router Agent node started")
+
+            agent_plan = list(state.get("agent_plan", []))
+            if agent_plan:
+                logger.info("Router Agent node reused existing agent plan with %s agent(s)", len(agent_plan))
+                return {
+                    **state,
+                    "agent_plan": OrchestrationNodeBuilder._normalize_agent_plan(agent_plan),
+                }
+
+            agent_input = {"messages": [HumanMessage(content=f"Topic:\n{state['topic']}")]}
+            result = agent.invoke(agent_input)
+            parsed_agent_plan = OrchestrationNodeBuilder._parse_router_result(result)
+
+            logger.info("Router Agent node completed with %s agent(s)", len(parsed_agent_plan))
+
+            return {
+                **state,
+                "agent_plan": parsed_agent_plan,
+            }
+
+        return router_agent_node
+
+    @staticmethod
+    def build_finalize_output() -> Callable[[State], dict[str, Any]]:
+
+        def finalize_output_node(state: State, /) -> dict[str, Any]:
+            logger.info("Finalize Output node started")
+
+            errors = list(state.get("errors", []))
+            report = state.get("report", "")
+
+            if errors and not report:
+                report = f"Error: {'; '.join(errors)}"
+
+            logger.info("Finalize Output node completed")
+
+            return {
+                **state,
+                "report": report,
+            }
+
+        return finalize_output_node

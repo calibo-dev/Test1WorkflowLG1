@@ -1,18 +1,35 @@
-from typing import TypedDict
+from __future__ import annotations
+
+from typing import Any, TypedDict
+
+class AgentConfig(TypedDict, total=False):
+    """
+    Internal agent configuration carried in workflow state.
+    """
+
+    id: str
+    enabled: bool
+    role: str
 
 
 class State(TypedDict):
     """
     Shared LangGraph state passed between workflow nodes.
 
-    query:
+    topic:
         Original user input for the workflow.
+    agent_plan:
+        Internal agent definitions used by the POC workflow.
+    errors:
+        Validation or orchestration errors collected during execution.
     research_result:
         Intermediate output from the research node.
     report:
         Final output produced by the reporting node.
     """
 
-    query: str
+    topic: str
+    agent_plan: list[AgentConfig]
+    errors: list[str]
     research_result: str
     report: str
