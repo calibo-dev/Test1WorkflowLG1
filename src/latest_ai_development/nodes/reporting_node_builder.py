@@ -1,4 +1,7 @@
-from __future__ import annotations
+# Deprecated node, removed in favor of primary_writer_node_builder.py
+# This file is now obsolete and can be deleted.
+
+# from __future__ import annotations
 
 import logging
 import os

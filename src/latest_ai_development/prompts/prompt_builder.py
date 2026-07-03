@@ -1,6 +1,18 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 
+def build_primary_researcher_prompt() -> str:
+    return """
+Review the provided topic and generate short structured research notes with key points.
+"""
+
+
+def build_primary_writer_prompt() -> str:
+    return """
+Generate a clear and concise response using the provided research notes.
+"""
+
+
 # ----------------------------
 # ROUTER AGENT PROMPT
 # ----------------------------

@@ -84,20 +84,42 @@ app = FastAPI(
 
 
 # --------------------------------------------------
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+from latest_ai_development.graph.graph_builder import GraphBuilder
+from latest_ai_development.graph.state import State
+
+
 class AskRequest(BaseModel):
     topic: str
 
 
 class AskResponse(BaseModel):
-    topic: str
-    report: str
+    article: str
 
 
-def _build_initial_state(
-    *,
-    topic: str,
-) -> State:
+def _build_initial_state(*, topic: str) -> State:
     return {
+        "topic": topic,
+        "research_notes": "",
+        "article": "",
+        "errors": [],
+        "final_output": "",
+    }
+
+
+app = FastAPI()
+
+
+@app.post("/ask", response_model=AskResponse)
+async def ask(request: AskRequest) -> AskResponse:
+    graph = GraphBuilder.build()
+    initial_state = _build_initial_state(topic=request.topic)
+    final_state = graph.execute(initial_state)
+
+    return AskResponse(article=final_state["article"])
+
         "topic": topic,
         "agent_plan": [],
         "errors": [],

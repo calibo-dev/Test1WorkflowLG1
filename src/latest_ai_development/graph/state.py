@@ -1,6 +1,6 @@
-from __future__ import annotations
+from typing import TypedDict, List
 
-from typing import Any, TypedDict
+from typing import TypedDict, List
 
 class AgentConfig(TypedDict, total=False):
     """
