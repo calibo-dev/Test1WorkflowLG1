@@ -20,7 +20,7 @@ def test_settings_default_runtime_values(monkeypatch):
 
     settings = Settings(_env_file=None)
 
-    assert settings.port == 8080
+    assert settings.port == 8089
     assert settings.context == "/"
     assert settings.output_dir_path.name == "output"
     assert settings.normalized_api_root_path == ""
@@ -63,6 +63,19 @@ def test_validate_configuration_requires_azure_key_vault_url_when_cloud_provider
         validate_configuration()
 
 
+def test_validate_configuration_requires_resolvable_provider_credentials(monkeypatch):
+    monkeypatch.setenv("PROVIDER", "OPENAI")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("OPENAI_API_KEY_SECRET", "")
+    monkeypatch.setenv("CLOUD_PROVIDER", "")
+
+    with pytest.raises(
+        ValueError,
+        match="API key not configured for the selected provider.",
+    ):
+        validate_configuration()
+
+
 def test_models_config_is_loaded_from_yaml():
     models_config = get_models_config()
 
@@ -101,6 +114,17 @@ def test_model_settings_uses_models_yaml_defaults(monkeypatch):
     assert model_settings.top_p == 1.0
     assert model_settings.max_tokens == 2000
     assert model_settings.extra["base_url"] == "http://ollama.internal:11434"
+
+
+def test_model_settings_supports_openai_provider(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+
+    model_settings = get_model_settings("openai")
+    models_config = get_models_config()
+
+    assert model_settings.provider == "openai"
+    assert model_settings.model == models_config["providers"]["openai"]["chat_model"]
+    assert model_settings.extra["api_key"] == "openai-test-key"
 
 
 def test_model_settings_supports_anthropic_provider(monkeypatch):

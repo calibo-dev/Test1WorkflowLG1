@@ -120,7 +120,7 @@ These deployment/runtime values are handled through centralized settings and the
   Used by uvicorn server startup.
 - `PORT`
   Used by uvicorn server startup.
-  Default: `8080`
+  Default: `8089`
 - `API_ROOT_PATH`
   Normalized through `normalized_api_root_path` and applied to FastAPI `root_path`.
 - `OUTPUT_DIR`
@@ -161,7 +161,7 @@ Typical API key configuration:
 
 - OpenAI:
   - direct value: `OPENAI_API_KEY`
-  - secret reference: `API_KEY_SECRET` or `OPENAI_API_KEY_SECRET`
+  - secret reference: `OPENAI_API_KEY_SECRET`
 - Anthropic:
   - direct value: `ANTHROPICAI_API_KEY`
   - secret reference: `ANTHROPICAI_API_KEY_SECRET`
@@ -187,6 +187,8 @@ Startup order is:
 1. load settings
 2. configure logging
 3. validate configuration
+   - verifies the selected provider exists in `models.yaml`
+   - resolves the selected provider credentials before the app starts serving requests
 4. initialize workflow controller
 5. initialize LangSmith tracing during app lifespan
 6. serve FastAPI routes

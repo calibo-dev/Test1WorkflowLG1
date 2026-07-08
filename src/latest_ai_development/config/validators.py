@@ -8,6 +8,7 @@ from latest_ai_development.config.settings import (
     get_settings,
     normalize_provider_name,
 )
+from latest_ai_development.llm.model_settings import get_model_settings
 
 
 def _resolve_reference(reference: str):
@@ -135,4 +136,5 @@ def validate_configuration() -> None:
             "AZURE_KEY_VAULT_URL is required when CLOUD_PROVIDER is set to AZURE."
         )
 
+    get_model_settings(env_provider)
     _validate_graph_config()

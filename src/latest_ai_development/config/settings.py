@@ -72,7 +72,7 @@ class Settings(BaseSettings):
 
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_root_path: str = Field(default="", alias="API_ROOT_PATH")
-    port: int = Field(default=8080, alias="PORT")
+    port: int = Field(default=8089, alias="PORT")
 
     context: str = Field(default="/", alias="CONTEXT")
 

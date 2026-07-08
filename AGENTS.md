@@ -103,7 +103,7 @@ Handled through settings:
 
 - `API_HOST`
 - `PORT`
-- Default: `8080`
+- Default: `8089`
 - `API_ROOT_PATH`
 - `OUTPUT_DIR`
 - Default: `output/`
@@ -126,7 +126,7 @@ Typical current secret resolution:
 
 - OpenAI:
   - direct value: `OPENAI_API_KEY`
-  - secret reference: `API_KEY_SECRET` or `OPENAI_API_KEY_SECRET`
+  - secret reference: `OPENAI_API_KEY_SECRET`
 - Anthropic:
   - direct value: `ANTHROPICAI_API_KEY`
   - secret reference: `ANTHROPICAI_API_KEY_SECRET`
@@ -141,6 +141,8 @@ App startup currently performs:
 1. configuration loading from `config/settings.py`
 2. logging configuration through `logging_utils.py`
 3. provider/config validation from `config/validators.py`
+   - validates that the selected provider exists in `models.yaml`
+   - resolves the selected provider credentials during startup
 4. workflow controller initialization through `workflow.py`
 5. LangSmith tracing initialization through `tracking.py` during FastAPI lifespan startup
 6. FastAPI app startup

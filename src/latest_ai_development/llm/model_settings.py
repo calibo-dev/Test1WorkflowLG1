@@ -33,6 +33,22 @@ def _resolve_api_key(*, direct_value: str, secret_name: str, secrets_manager: Se
     return None
 
 
+def _resolve_required_api_key(
+    *,
+    direct_value: str,
+    secret_name: str,
+    secrets_manager: SecretsManager,
+) -> str:
+    api_key = _resolve_api_key(
+        direct_value=direct_value,
+        secret_name=secret_name,
+        secrets_manager=secrets_manager,
+    )
+    if not api_key:
+        raise ValueError("API key not configured for the selected provider.")
+    return api_key
+
+
 def get_model_settings(provider_name: str | None = None) -> ModelSettings:
     settings = get_settings()
     models_cfg = get_models_config()
@@ -56,31 +72,28 @@ def get_model_settings(provider_name: str | None = None) -> ModelSettings:
     extra: dict[str, Any] = {}
 
     if provider == "openai":
-        api_key = _resolve_api_key(
+        api_key = _resolve_required_api_key(
             direct_value=settings.openai_api_key,
             secret_name=settings.openai_api_key_secret,
             secrets_manager=secrets_manager,
         )
-        if api_key:
-            extra["api_key"] = api_key
+        extra["api_key"] = api_key
 
     elif provider == "anthropicai":
-        api_key = _resolve_api_key(
+        api_key = _resolve_required_api_key(
             direct_value=settings.anthropicai_api_key,
             secret_name=settings.anthropicai_api_key_secret,
             secrets_manager=secrets_manager,
         )
-        if api_key:
-            extra["api_key"] = api_key
+        extra["api_key"] = api_key
 
     elif provider == "geminiai":
-        api_key = _resolve_api_key(
+        api_key = _resolve_required_api_key(
             direct_value=settings.geminiai_api_key,
             secret_name=settings.geminiai_api_key_secret,
             secrets_manager=secrets_manager,
         )
-        if api_key:
-            extra["api_key"] = api_key
+        extra["api_key"] = api_key
 
     elif provider == "ollama":
         extra["base_url"] = settings.ollama_base_url

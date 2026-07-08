@@ -80,6 +80,7 @@ htmlcov/
 checkpoints/
 runs/
 graphs/
+output/
 
 #############################################
 # Model / Vector DB local storage (if any)
