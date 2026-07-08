@@ -1,0 +1,35 @@
+entry_point: validate_input
+final_output_field: report
+
+nodes:
+  validate_input:
+    builder: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.build_validate_input
+  router_agent:
+    builder: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.build_router_agent
+  research:
+    builder: latest_ai_development.nodes.research_node_builder:ResearchNodeBuilder.build
+  reporting:
+    builder: latest_ai_development.nodes.reporting_node_builder:ReportingNodeBuilder.build
+  finalize_output:
+    builder: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.build_finalize_output
+
+edges:
+  - from: validate_input
+    to: router_agent
+  - from: reporting
+    to: finalize_output
+  - from: finalize_output
+    to: END
+
+conditional_edges:
+  - from: router_agent
+    router: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.route_after_router_agent
+    path_map:
+      research: research
+      reporting: reporting
+      finalize_output: finalize_output
+  - from: research
+    router: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.route_after_research
+    path_map:
+      reporting: reporting
+      finalize_output: finalize_output

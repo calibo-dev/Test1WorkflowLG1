@@ -4,14 +4,13 @@
 # from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
 from collections.abc import Callable
 from typing import Any, cast
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
+from latest_ai_development.config.settings import get_settings
 from latest_ai_development.graph.state import State
 from latest_ai_development.llm.llm_factory import LLMFactory
 from latest_ai_development.prompts.prompt_builder import build_reporting_prompt
@@ -43,19 +42,12 @@ def _build_reporting_message(state: State) -> str:
         f"Research Result:\n{research_result}"
     )
 
-
-def _write_report_markdown(report: str) -> None:
-    output_path = Path("./data/report.md")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(report, encoding="utf-8")
-
-
 class ReportingNodeBuilder:
 
     @staticmethod
     def build() -> Callable[[State], dict[str, Any]]:
         logger.info("Building Reporting Node...")
-        provider = os.getenv("PROVIDER", "ollama").lower()
+        provider = get_settings().provider.lower()
         
         logger.info("Creating LLM for Reporting Node with provider=%s...", provider)
         llm = LLMFactory().create_llm(provider=provider)
@@ -78,7 +70,6 @@ class ReportingNodeBuilder:
             result = agent.invoke(cast(Any, agent_input))
 
             report = result["messages"][-1].content
-            _write_report_markdown(report)
 
             logger.info("Reporting Node completed successfully")
             logger.debug(f"Generated Report: {report}")

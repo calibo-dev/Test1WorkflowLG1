@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from langchain.chat_models import init_chat_model
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from latest_ai_development.llm.model_settings import (
@@ -11,32 +12,77 @@ from latest_ai_development.llm.model_settings import (
 
 class LLMFactory:
     """
-    Creates LangChain chat models via init_chat_model.
-    Provider and all config are driven by PROVIDER env var + models.yaml.
+    Create provider-specific LangChain chat models.
+    Provider and model config are driven by centralized settings + models.yaml.
 
     IMPORTANT FOR AI / FUTURE EDITS:
-    - Add new providers in models.yaml under `providers:`.
+    - Add new providers in src/latest_ai_development/config/models.yaml under `providers:`.
     - Do not create LLMs directly inside steps.
     - Steps should call LLMFactory().create_llm().
     """
 
-    def create_llm(self, provider: str) -> BaseChatModel:
-        """Resolve settings from env + models.yaml and create the model."""
-        settings = get_model_settings(provider_name = provider)
+    def create_llm(self, provider: str | None = None) -> BaseChatModel:
+        """
+        Resolve settings from centralized config and create the model.
+
+        Supports:
+        - OpenAI
+        - Anthropic
+        - Gemini
+        - Ollama
+        """
+        settings = get_model_settings(provider_name=provider)
         return self.create(settings)
 
     def create(self, model_settings: ModelSettings) -> BaseChatModel:
         """Build a chat model from an already-resolved ModelSettings instance."""
-        kwargs = {
-            "temperature": model_settings.temperature,
-            "top_p": model_settings.top_p,
-            "max_tokens": model_settings.max_tokens,
-            **model_settings.extra,
-        }
+        provider = model_settings.provider
 
-        return init_chat_model(
-            model=model_settings.model,
-            model_provider=model_settings.provider,
-            configurable_fields=None,
-            **kwargs,
-        )
+        if provider == "openai":
+            return ChatOpenAI(
+                model=model_settings.model,
+                temperature=model_settings.temperature,
+                api_key=model_settings.extra.get("api_key"),
+                max_tokens=model_settings.max_tokens,
+            )
+
+        if provider == "anthropicai":
+            try:
+                from langchain_anthropic import ChatAnthropic
+            except ImportError as exc:
+                raise ImportError(
+                    "Anthropic provider requires the 'langchain-anthropic' package. "
+                    "Run `uv sync` to install template dependencies."
+                ) from exc
+
+            return ChatAnthropic(
+                model=model_settings.model,
+                temperature=model_settings.temperature,
+                api_key=model_settings.extra.get("api_key"),
+                max_tokens=model_settings.max_tokens,
+            )
+
+        if provider == "geminiai":
+            try:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+            except ImportError as exc:
+                raise ImportError(
+                    "Gemini provider requires the 'langchain-google-genai' package. "
+                    "Run `uv sync` to install template dependencies."
+                ) from exc
+
+            return ChatGoogleGenerativeAI(
+                model=model_settings.model,
+                temperature=model_settings.temperature,
+                api_key=model_settings.extra.get("api_key"),
+                max_tokens=model_settings.max_tokens,
+            )
+
+        if provider == "ollama":
+            return ChatOllama(
+                model=model_settings.model,
+                temperature=model_settings.temperature,
+                base_url=model_settings.extra.get("base_url"),
+            )
+
+        raise ValueError(f"Unsupported provider: {provider}")

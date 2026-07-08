@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 
 import boto3
 from boto3.session import Session
 from botocore.exceptions import ClientError
+
+from latest_ai_development.config.settings import get_settings
 
 
 class AWSSecretsManager:
@@ -15,7 +16,8 @@ class AWSSecretsManager:
         The AWS region is retrieved from the 'AWS_REGION' environment variable,
         defaulting to 'us-east-1' if not set.
         """
-        region_name = os.environ.get("AWS_REGION", "us-east-1")
+        settings = get_settings()
+        region_name = settings.aws_region
         self.session: Session = Session()
         self.client = self.session.client(
             service_name="secretsmanager",
@@ -49,7 +51,8 @@ class AzureKeyVaultSecretsManager:
         Initializes the AzureKeyVaultSecretsManager with DefaultAzureCredential
         and Key Vault URL from environment variables.
         """
-        key_vault_url = os.getenv("AZURE_KEY_VAULT_URL")
+        settings = get_settings()
+        key_vault_url = settings.azure_key_vault_url
         if not key_vault_url:
             raise ValueError(
                 "AZURE_KEY_VAULT_URL is required when CLOUD_PROVIDER is set to AZURE."
@@ -107,7 +110,8 @@ class SecretsManager:
         Initializes the SecretsManager based on the configured cloud provider.
         Supported values for CLOUD_PROVIDER are empty/local, AWS, and AZURE.
         """
-        self.cloud_provider = os.getenv("CLOUD_PROVIDER", "").strip().upper()
+        settings = get_settings()
+        self.cloud_provider = settings.cloud_provider.strip().upper()
 
         if self.cloud_provider == "":
             self.manager = None

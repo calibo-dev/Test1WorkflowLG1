@@ -4,13 +4,13 @@
 # from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable
 from typing import Any, cast
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
+from latest_ai_development.config.settings import get_settings
 from latest_ai_development.graph.state import State
 from latest_ai_development.llm.llm_factory import LLMFactory
 from latest_ai_development.prompts.prompt_builder import build_research_prompt
@@ -42,7 +42,7 @@ class ResearchNodeBuilder:
     @staticmethod
     def build() -> Callable[[State], dict[str, Any]]:
         logger.info("Building Research Node...")
-        provider = os.getenv("PROVIDER", "ollama").lower()
+        provider = get_settings().provider.lower()
 
         logger.info("Creating LLM for Research Node with provider=%s...", provider)
         llm = LLMFactory().create_llm(provider=provider)

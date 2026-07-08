@@ -1,24 +1,15 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any
 
-from dotenv import load_dotenv
-
+from latest_ai_development.config.settings import (
+    get_models_config,
+    get_settings,
+    normalize_provider_name,
+)
 from latest_ai_development.secrets_manager import SecretsManager
 
-
-# --------------------------------------------------
-# LOAD .env FILE (IMPORTANT)
-# --------------------------------------------------
-
-load_dotenv()
-
-
-# --------------------------------------------------
-# MODEL SETTINGS
-# --------------------------------------------------
 
 @dataclass(frozen=True)
 class ModelSettings:
@@ -27,145 +18,83 @@ class ModelSettings:
     temperature: float
     top_p: float
     max_tokens: int
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
-# --------------------------------------------------
-# MAIN CONFIG
-# --------------------------------------------------
+def _resolve_api_key(*, direct_value: str, secret_name: str, secrets_manager: SecretsManager) -> str | None:
+    direct_value = direct_value.strip()
+    if direct_value:
+        return direct_value
 
-
-def _resolve_api_key(
-    *,
-    secrets_manager: SecretsManager,
-    direct_env_names: list[str],
-    secret_env_names: list[str],
-) -> str | None:
-    """
-    Resolve an API key using the following priority:
-
-    1. Direct value from a plain environment variable
-    2. Secret reference resolved through SecretsManager
-    """
-    for env_name in direct_env_names:
-        value = os.getenv(env_name)
-        if value:
-            return value
-
-    for env_name in secret_env_names:
-        secret_name = os.getenv(env_name)
-        if secret_name:
-            return secrets_manager.get_secret(secret_name)
+    secret_name = secret_name.strip()
+    if secret_name:
+        return secrets_manager.get_secret(secret_name)
 
     return None
 
 
-def get_model_settings(provider_name: str) -> ModelSettings:
-
-    if not provider_name:
-        raise ValueError("provider_name is required")
-
-    provider_name = provider_name.lower()
-
+def get_model_settings(provider_name: str | None = None) -> ModelSettings:
+    settings = get_settings()
+    models_cfg = get_models_config()
     secrets_manager = SecretsManager()
 
+    provider = normalize_provider_name(provider_name or settings.provider)
+    providers = models_cfg.get("providers", {})
+    provider_cfg = providers.get(provider)
 
-    defaults = {
-        "openai": {
-            "model": "gpt-4o-mini",
-            "temperature": 0.3,
-            "top_p": 1.0,
-            "max_tokens": 2000,
-            "direct_api_key_envs": ["OPENAI_API_KEY"],
-            "secret_envs": ["API_KEY_SECRET", "OPENAI_API_KEY_SECRET"],
-        },
+    if not isinstance(provider_cfg, dict):
+        raise ValueError(f"Provider '{provider}' not configured in models.yaml")
 
-        "azure_openai": {
-            "model": "gpt-4o-mini",
-            "temperature": 0.3,
-            "top_p": 1.0,
-            "max_tokens": 2000,
-            "direct_api_key_envs": ["AZURE_OPENAI_API_KEY"],
-            "secret_envs": ["API_KEY_SECRET", "AZURE_OPENAI_API_KEY_SECRET"],
-            "endpoint_envs": ["AZURE_OPENAI_ENDPOINT", "AZUREAI_OPENAI_URL"],
-            "api_version_envs": ["AZURE_OPENAI_API_VERSION", "AZUREAI_OPENAI_API_VERSION"],
-        },
+    model_name = str(
+        provider_cfg.get("chat_model")
+        or models_cfg.get("default_model")
+        or ""
+    ).strip()
+    if not model_name:
+        raise ValueError(f"Provider '{provider}' must define chat_model in models.yaml")
 
-        "ollama": {
-            "model": "llama3",
-            "temperature": 0.3,
-            "top_p": 1.0,
-            "max_tokens": 2000,
-            "base_url_env": "OLLAMA_BASE_URL",
-        },
-    }
+    extra: dict[str, Any] = {}
 
-    if provider_name not in defaults:
+    if provider == "openai":
+        api_key = _resolve_api_key(
+            direct_value=settings.openai_api_key,
+            secret_name=settings.openai_api_key_secret,
+            secrets_manager=secrets_manager,
+        )
+        if api_key:
+            extra["api_key"] = api_key
+
+    elif provider == "anthropicai":
+        api_key = _resolve_api_key(
+            direct_value=settings.anthropicai_api_key,
+            secret_name=settings.anthropicai_api_key_secret,
+            secrets_manager=secrets_manager,
+        )
+        if api_key:
+            extra["api_key"] = api_key
+
+    elif provider == "geminiai":
+        api_key = _resolve_api_key(
+            direct_value=settings.geminiai_api_key,
+            secret_name=settings.geminiai_api_key_secret,
+            secrets_manager=secrets_manager,
+        )
+        if api_key:
+            extra["api_key"] = api_key
+
+    elif provider == "ollama":
+        extra["base_url"] = settings.ollama_base_url
+
+    else:
         raise ValueError(
-            f"Unknown provider '{provider_name}'. "
-            f"Supported: {list(defaults.keys())}"
+            f"Unsupported provider '{provider}'. Supported providers: {sorted(providers.keys())}"
         )
-
-    cfg = defaults[provider_name]
-    extra: Dict[str, Any] = {}
-
-    # --------------------------------------------------
-    # OPENAI
-    # --------------------------------------------------
-
-    if provider_name == "openai":
-        api_key = _resolve_api_key(
-            secrets_manager=secrets_manager,
-            direct_env_names=cfg["direct_api_key_envs"],
-            secret_env_names=cfg["secret_envs"],
-        )
-        if api_key:
-            extra["api_key"] = api_key
-
-    # --------------------------------------------------
-    # AZURE OPENAI
-    # --------------------------------------------------
-
-    elif provider_name == "azure_openai":
-        api_key = _resolve_api_key(
-            secrets_manager=secrets_manager,
-            direct_env_names=cfg["direct_api_key_envs"],
-            secret_env_names=cfg["secret_envs"],
-        )
-        if api_key:
-            extra["api_key"] = api_key
-
-        for env_name in cfg["endpoint_envs"]:
-            endpoint = os.getenv(env_name)
-            if endpoint:
-                extra["azure_endpoint"] = endpoint
-                break
-
-        for env_name in cfg["api_version_envs"]:
-            api_version = os.getenv(env_name)
-            if api_version:
-                extra["api_version"] = api_version
-                break
-
-    # --------------------------------------------------
-    # OLLAMA
-    # --------------------------------------------------
-
-    elif provider_name == "ollama":
-        extra["base_url"] = os.getenv(
-            cfg["base_url_env"],
-            "http://localhost:11434"
-        )
-
-    # --------------------------------------------------
-    # RETURN
-    # --------------------------------------------------
 
     return ModelSettings(
-        provider=provider_name,
-        model=cfg["model"],
-        temperature=cfg["temperature"],
-        top_p=cfg["top_p"],
-        max_tokens=cfg["max_tokens"],
+        provider=provider,
+        model=model_name,
+        temperature=float(provider_cfg.get("temperature", 0.3)),
+        top_p=float(provider_cfg.get("top_p", 1.0)),
+        max_tokens=int(provider_cfg.get("max_tokens", 2000)),
         extra=extra,
     )

@@ -2,93 +2,67 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
+from uuid import uuid4
 
-import uvicorn
-from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from latest_ai_development.graph.graph_builder import GraphBuilder
+from latest_ai_development.config.settings import get_settings
+from latest_ai_development.config.validators import validate_configuration
 from latest_ai_development.graph.state import State
+from latest_ai_development.logging_utils import configure_logging
 from latest_ai_development.tracking import initialize_langsmith_tracing
+from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
 
-load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
-)
+def _initialize_settings():
+    runtime_settings = get_settings()
+    configure_logging(getattr(runtime_settings, "log_level", "INFO"))
+    return runtime_settings
+
+
+settings = _initialize_settings()
 logger = logging.getLogger(__name__)
 
 
-# --------------------------------------------------
-# Initialization
-# --------------------------------------------------
-
-graph = None
-tracing_initialized = False
-
-
-def _normalize_context(raw_context: str | None) -> str:
-    """Return a stable path prefix like '/testing' or ''."""
-    if not raw_context:
-        return ""
-
-    normalized = raw_context.strip()
-    if not normalized or normalized == "/":
-        return ""
-
-    return "/" + normalized.strip("/")
+def _validate_startup_configuration() -> None:
+    try:
+        validate_configuration()
+    except Exception:
+        logger.exception("Startup configuration validation failed")
+        raise
 
 
-CONTEXT_PATH = _normalize_context(os.getenv("CONTEXT"))
+def _initialize_workflow() -> LatestAiDevelopmentWorkflow:
+    try:
+        return LatestAiDevelopmentWorkflow()
+    except Exception:
+        logger.exception("Workflow initialization failed")
+        raise
 
 
-def ensure_tracing_initialized() -> None:
-    global tracing_initialized
-    if not tracing_initialized:
-        initialize_langsmith_tracing()
-        tracing_initialized = True
-
-
-def get_graph():
-    global graph
-    ensure_tracing_initialized()
-    if graph is None:
-        graph = GraphBuilder.build()
-    return graph
+_validate_startup_configuration()
+workflow = _initialize_workflow()
+API_ROOT_PATH = settings.normalized_api_root_path
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    ensure_tracing_initialized()
+    initialize_langsmith_tracing()
     yield
 
 
-# --------------------------------------------------
-# FastAPI App
-# --------------------------------------------------
-
 app = FastAPI(
-    title="Latest AI Development",
+    title=settings.app_name,
     version="0.1.0",
-    description="LangGraph Research + Reporting Workflow",
-    root_path=CONTEXT_PATH,
+    description="LangGraph workflow for automated research and report generation",
+    root_path=API_ROOT_PATH,
     lifespan=lifespan,
 )
-
-
-# --------------------------------------------------
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-from latest_ai_development.graph.graph_builder import GraphBuilder
-from latest_ai_development.graph.state import State
 
 
 class AskRequest(BaseModel):
@@ -96,138 +70,102 @@ class AskRequest(BaseModel):
 
 
 class AskResponse(BaseModel):
-    article: str
+    topic: str
+    report: str
+
+
+def get_graph():
+    return workflow.get_graph()
 
 
 def _build_initial_state(*, topic: str) -> State:
-    return {
-        "topic": topic,
-        "research_notes": "",
-        "article": "",
-        "errors": [],
-        "final_output": "",
-    }
-
-
-app = FastAPI()
-
-
-@app.post("/ask", response_model=AskResponse)
-async def ask(request: AskRequest) -> AskResponse:
-    graph = GraphBuilder.build()
-    initial_state = _build_initial_state(topic=request.topic)
-    final_state = graph.execute(initial_state)
-
-    return AskResponse(article=final_state["article"])
-
-        "topic": topic,
-        "agent_plan": [],
-        "errors": [],
-        "research_result": "",
-        "report": "",
-    }
+    return workflow.build_initial_state(topic=topic)
 
 
 def _invoke_workflow(*, topic: str) -> State:
-    return get_graph().invoke(_build_initial_state(topic=topic))
+    return workflow.kickoff({"topic": topic})
 
-
-# --------------------------------------------------
-# Health
-# --------------------------------------------------
 
 @app.get("/health")
-async def health() -> Dict[str, Any]:
+async def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "timestamp": datetime.now().isoformat(),
     }
 
 
-# --------------------------------------------------
-# Ask Endpoint
-# --------------------------------------------------
-
 @app.post("/ask", response_model=AskResponse)
 async def ask(request: AskRequest):
+    flow_run_id = uuid4().hex[:12]
+    logger.info(
+        "Request started | flow_run_id=%s | topic=%s",
+        flow_run_id,
+        request.topic,
+    )
 
     try:
-        result = _invoke_workflow(topic=request.topic)
-
-        return AskResponse(
-            topic=request.topic,
-            report=result["report"],
+        result = workflow.kickoff({"topic": request.topic}, flow_run_id=flow_run_id)
+    except Exception as exc:
+        logger.exception(
+            "Request failed | flow_run_id=%s | topic=%s",
+            flow_run_id,
+            request.topic,
         )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Workflow execution failed. flow_run_id={flow_run_id}",
+        ) from exc
 
-    except Exception as e:
-        return AskResponse(
-            topic=request.topic,
-            report=f"Error: {str(e)}",
-        )
+    logger.info(
+        "Request completed | flow_run_id=%s | topic=%s",
+        flow_run_id,
+        request.topic,
+    )
+    return AskResponse(
+        topic=request.topic,
+        report=str(result.get(workflow.final_output_field, "")),
+    )
 
 
-# --------------------------------------------------
-# CLI Test
-# --------------------------------------------------
-
-def test():
-
+def test() -> None:
     result = _invoke_workflow(topic="Latest AI Agent Frameworks")
+    print(result.get(workflow.final_output_field, ""))
 
-    print(result["report"])
 
-
-# --------------------------------------------------
-# Trigger From JSON
-# --------------------------------------------------
-
-def run_with_trigger():
-
+def run_with_trigger() -> None:
     if len(sys.argv) < 2:
         raise ValueError("Provide JSON payload")
 
     payload = json.loads(sys.argv[1])
-
-    result = _invoke_workflow(topic=payload["topic"])
-
+    result = workflow.kickoff(payload)
     print(result)
 
 
-# --------------------------------------------------
-# Server
-# --------------------------------------------------
-
-def run():
+def run() -> None:
+    import uvicorn
 
     uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
+        "latest_ai_development.main:app",
+        host=settings.api_host,
+        port=settings.port,
+        reload=settings.debug,
+        log_level=str(settings.log_level).lower(),
     )
 
-
-# --------------------------------------------------
-# Entry Point
-# --------------------------------------------------
 
 if __name__ == "__main__":
-
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-    )
+    run()
 
 
-if CONTEXT_PATH:
+if API_ROOT_PATH:
     app.add_api_route(
-        f"{CONTEXT_PATH}/health",
+        f"{API_ROOT_PATH}/health",
         health,
         methods=["GET"],
         include_in_schema=False,
     )
     app.add_api_route(
-        f"{CONTEXT_PATH}/ask",
+        f"{API_ROOT_PATH}/ask",
         ask,
         methods=["POST"],
         include_in_schema=False,
