@@ -1,207 +1,141 @@
-# LangGraph Multi-Agent Research & Reporting System
+# LangGraph Python Template
 
-> **NOTE**
->
-> This document is provided as a starter template only.
-> Customers must review, update, and validate this content to ensure it meets their functional, security, compliance, and operational requirements before deployment.
+This repository is the LangGraph workflow template for `latest-ai-development`.
+It exposes a FastAPI app, centralizes runtime configuration, and executes a small graph-based research and reporting workflow.
 
----
+## Runtime Contract
 
-## 1. Overview
+The template now uses a centralized configuration layer:
 
-This project is a production-oriented **LangGraph Multi-Agent AI System** built in Python.
+- `src/latest_ai_development/config/settings.py`
+  Reads environment variables with `BaseSettings`, normalizes provider and API root-path values, and manages output paths.
+- `src/latest_ai_development/config/models.yaml`
+  Declares provider-specific model defaults.
+- `src/latest_ai_development/config/graph_config.yaml`
+  Declares graph topology, entry point, edges, conditional routes, and the final output field.
+- `src/latest_ai_development/config/validators.py`
+  Validates provider and cloud-secret configuration during startup.
+- `src/latest_ai_development/workflow.py`
+  Owns graph creation, initial state construction, workflow kickoff, and final report persistence.
+- `src/latest_ai_development/logging_utils.py`
+  Applies shared startup logging configuration without clobbering existing handlers.
 
-The application orchestrates multiple AI agents in a graph-based workflow to perform:
+## Current Workflow
 
-- Research on a given topic
-- Analyze collected information
-- Generate structured markdown reports
-- Support multiple LLM providers
-- Secure secret management
-- Containerized deployment using Docker, Helm, and Jenkins
+The current template compiles a LangGraph workflow from `src/latest_ai_development/config/graph_config.yaml`, while node behavior remains in Python node-builder files.
 
-The project uses **LangGraph** for orchestration and provides a modular architecture that can be extended with additional agents, tools, and workflows.
-
----
-
-## 2. Architecture
-
-The system follows a graph-based multi-agent workflow.
+Current graph-config flow:
 
 ```text
-                 User Query
-                      |
-                      v
-
-            +----------------+
-            | Graph Builder  |
-            +----------------+
-                      |
-          -------------------------
-          |                       |
-          v                       v
-
- +----------------+     +----------------+
- | Research Node  | --> | Reporting Node |
- +----------------+     +----------------+
-          |                       |
-          -------------------------
-                      |
-                      v
-
-             Markdown Report
+validate_input
+  -> router_agent
+  -> research | reporting | finalize_output
+research
+  -> reporting | finalize_output
+reporting
+  -> finalize_output
+finalize_output
+  -> END
 ```
 
----
+Current shared state lives in `src/latest_ai_development/graph/state.py` and contains:
 
-## 3. Tech Stack
+- `topic`
+- `agent_plan`
+- `errors`
+- `research_result`
+- `report`
 
-| Technology | Version |
-|------------|---------|
-| Python | >=3.11 |
-| LangGraph | Latest |
-| LangChain | >=0.3 |
-| FastAPI | Latest |
-| OpenAI | Supported |
-| Ollama | Supported |
-| AWS Secrets Manager | Supported |
-| Docker | Supported |
-| Helm | Supported |
-| Jenkins | Supported |
+The external request contract is intentionally small:
 
----
-
-## 4. Project Structure
-
-```bash
-.
-├── helm_chart/
-│   ├── Chart.yaml
-│   └── templates/
-│
-├── src/
-│   └── latest_ai_development/
-│
-│       ├── graph/
-│       │   ├── graph_builder.py
-│       │   └── state.py
-│
-│       ├── llm/
-│       │   ├── llm_factory.py
-│       │   └── model_settings.py
-│
-│       ├── nodes/
-│       │   ├── research_node_builder.py
-│       │   └── reporting_node_builder.py
-│
-│       ├── prompts/
-│       │   └── prompt_builder.py
-│
-│       ├── main.py
-│       └── secrets_manager.py
-│
-├── AGENTS.md
-├── Dockerfile
-├── Jenkinsfile
-├── Jenkinsfile.ci
-├── Jenkinsfile.deploy
-├── pyproject.toml
-├── uv.lock
-├── README.md
-└── .gitignore
+```json
+{
+  "topic": "Explain LangGraph workflow support"
+}
 ```
 
----
+The response contract is:
 
-## 5. Components
+```json
+{
+  "topic": "Explain LangGraph workflow support",
+  "report": "..."
+}
+```
 
-### Graph Builder
+## Project Structure
 
-**File:** `graph/graph_builder.py`
+```text
+src/latest_ai_development/
+├── config/
+│   ├── __init__.py
+│   ├── graph_config.yaml
+│   ├── models.yaml
+│   ├── settings.py
+│   └── validators.py
+├── graph/
+│   ├── graph_builder.py
+│   └── state.py
+├── logging_utils.py
+├── llm/
+│   ├── llm_factory.py
+│   └── model_settings.py
+├── nodes/
+│   ├── orchestration_node_builder.py
+│   ├── reporting_node_builder.py
+│   └── research_node_builder.py
+├── prompts/
+│   └── prompt_builder.py
+├── main.py
+├── secrets_manager.py
+├── tracking.py
+└── workflow.py
+```
 
-Responsible for:
+## Configuration
 
-- Building LangGraph workflow
-- Defining node transitions
-- Managing graph execution flow
-- Routing state between agents
+Important environment variables are resolved through `Settings` in `config/settings.py`.
 
----
+Common values:
 
-### State Management
+- `PROVIDER`
+  Supported by the current template: `OPENAI`, `ANTHROPIC`, `GEMINI`, `OLLAMA`
+- `API_HOST`
+- `PORT`
+- `API_ROOT_PATH`
+- `OUTPUT_DIR`
+- `REPORT_OUTPUT_FILE`
+- `LANGSMITH_API_KEY` or `LANGSMITH_API_KEY_SECRET`
+- `LANGSMITH_PROJECT`
+- `CLOUD_PROVIDER`
+- `AWS_REGION`
+- `AZURE_KEY_VAULT_URL`
 
-**File:** `graph/state.py`
+Model defaults come from `src/latest_ai_development/config/models.yaml`, not from hardcoded values in the graph or node files.
+Graph topology comes from `src/latest_ai_development/config/graph_config.yaml`, not from hardcoded edges inside `graph_builder.py`.
 
-Defines:
+These deployment/runtime values are handled through centralized settings and then consumed by the runtime:
 
-- Shared graph state
-- Input and output schema
-- Agent communication state
-- Intermediate results
+- `API_HOST`
+  Used by uvicorn server startup.
+- `PORT`
+  Used by uvicorn server startup.
+  Default: `8089`
+- `API_ROOT_PATH`
+  Normalized through `normalized_api_root_path` and applied to FastAPI `root_path`.
+- `OUTPUT_DIR`
+  Used to build the final report output directory.
+  Default: `output/`
+- `REPORT_OUTPUT_FILE`
+  Used to build the final report output filename.
+- `AZURE_KEY_VAULT_URL`
+  Used by the Azure Key Vault secret manager when `CLOUD_PROVIDER=AZURE`.
+- `CONTEXT`
+  Defaults to `/` and is used as the fallback source for API root-path normalization when `API_ROOT_PATH` is not set.
 
----
+## Secrets Manager
 
-### LLM Factory
-
-**File:** `llm/llm_factory.py`
-
-Responsible for:
-
-- Creating LLM clients
-- Selecting providers
-- Managing model initialization
-- Centralized model configuration
-
-Supported providers:
-
-- OpenAI
-- Ollama
-- Extendable to Anthropic, Gemini, Groq
-
----
-
-### Research Node
-
-**File:** `nodes/research_node_builder.py`
-
-Responsible for:
-
-- Topic understanding
-- Information gathering
-- Data analysis
-- Structured research generation
-
----
-
-### Reporting Node
-
-**File:** `nodes/reporting_node_builder.py`
-
-Responsible for:
-
-- Summarizing research
-- Generating markdown reports
-- Formatting final output
-- Creating human-readable responses
-
----
-
-### Prompt Builder
-
-**File:** `prompts/prompt_builder.py`
-
-Responsible for:
-
-- Prompt templates
-- System prompts
-- User prompt construction
-- Agent-specific instructions
-
----
-
-### Secrets Manager
-
-**File:** `secrets_manager.py`
+**File:** `src/latest_ai_development/secrets_manager.py`
 
 Provides secure access to:
 
@@ -212,179 +146,123 @@ Provides secure access to:
 
 AWS Secrets Manager integration is supported.
 
----
+Current template behavior:
 
-## 6. Installation
+- `CLOUD_PROVIDER=AWS` uses AWS Secrets Manager
+- `CLOUD_PROVIDER=AZURE` uses Azure Key Vault
+- empty/unset `CLOUD_PROVIDER` is treated as local-development mode
 
-### Clone Repository
+Local-development mode:
 
-```bash
-git clone <repository-url>
+- secret-related environment variables are treated as direct values
+- this allows local runs without external secret-manager dependencies
 
-cd <repository-name>
-```
+Typical API key configuration:
 
----
+- OpenAI:
+  - direct value: `OPENAI_API_KEY`
+  - secret reference: `OPENAI_API_KEY_SECRET`
+- Anthropic:
+  - direct value: `ANTHROPICAI_API_KEY`
+  - secret reference: `ANTHROPICAI_API_KEY_SECRET`
+- Gemini:
+  - direct value: `GEMINIAI_API_KEY`
+  - secret reference: `GEMINIAI_API_KEY_SECRET`
 
-### Create Virtual Environment
+## Observability and Tracing
 
-#### Linux / Mac
+- LangSmith tracing is required for this template
+- the template enables LangSmith during FastAPI app startup
+- if LangSmith credentials are missing, startup fails
 
-```bash
-python -m venv .venv
+LangSmith configuration:
 
-source .venv/bin/activate
-```
+- API key can come from:
+  - `LANGSMITH_API_KEY`
+  - `LANGSMITH_API_KEY_SECRET`
+- project name can be provided with `LANGSMITH_PROJECT`
 
-#### Windows
+Startup order is:
 
-```bash
-python -m venv .venv
+1. load settings
+2. configure logging
+3. validate configuration
+   - verifies the selected provider exists in `models.yaml`
+   - resolves the selected provider credentials before the app starts serving requests
+4. initialize workflow controller
+5. initialize LangSmith tracing during app lifespan
+6. serve FastAPI routes
 
-.venv\Scripts\activate
-```
+## YAML-First Topology Changes
 
----
+This template intentionally does not use LangChain-style `workflow.yaml` or `stages.yaml`.
 
-### Install Dependencies
+For LangGraph changes:
 
-Using UV:
+- update `src/latest_ai_development/config/graph_config.yaml` first when the topology changes
+- keep node behavior in `nodes/*_node_builder.py`
+- only update Python files beyond the node builders when the state contract, prompts, or API contract changes
+
+`graph/graph_builder.py` is now a generic compiler that reads `graph_config.yaml`, resolves Python builders and router functions, and builds the graph from that config.
+
+## Running
+
+Install dependencies:
 
 ```bash
 uv sync
 ```
 
-or
+Run the FastAPI app:
 
 ```bash
-uv pip install -e .
+uv run latest_ai_development
 ```
 
----
-
-## 7. Environment Variables
-
-Create a `.env` file:
-
-```env
-OPENAI_API_KEY=your_key
-
-OLLAMA_BASE_URL=http://localhost:11434
-
-AWS_REGION=us-east-1
-
-LANGCHAIN_TRACING_V2=true
-
-LANGCHAIN_API_KEY=your_langsmith_key
-
-LANGCHAIN_PROJECT=langgraph-research-agent
-```
-
----
-
-## 8. Running the Application
-
-Run locally:
+Run the direct test helper:
 
 ```bash
-PYTHONPATH=src uv run python -m latest_ai_development.main
+uv run test
 ```
 
-or
+Run with a trigger payload:
 
 ```bash
-python src/latest_ai_development/main.py
+uv run run_with_trigger '{"topic":"Explain LangGraph workflow support"}'
 ```
 
----
+## API
 
-## 9. Docker
+Health endpoint:
 
-Build Docker image:
+```text
+GET /health
+```
+
+Workflow endpoint:
+
+```text
+POST /ask
+```
+
+Example request:
+
+```json
+{
+  "topic": "Explain LangGraph workflow support"
+}
+```
+
+## Testing
+
+Run the test suite:
 
 ```bash
-docker build -t langgraph-agent .
+uv run --with pytest python -m pytest
 ```
 
-Run container:
+## Notes
 
-```bash
-docker run -p 8000:8000 langgraph-agent
-```
-
----
-
-## 10. Helm Deployment
-
-Helm charts are provided inside:
-
-```bash
-helm_chart/
-```
-
-Install:
-
-```bash
-helm install langgraph-agent ./helm_chart
-```
-
-Upgrade:
-
-```bash
-helm upgrade langgraph-agent ./helm_chart
-```
-
----
-
-## 11. CI/CD
-
-The project provides Jenkins pipelines:
-
-- `Jenkinsfile`
-- `Jenkinsfile.ci`
-- `Jenkinsfile.deploy`
-
-These pipelines can be used for:
-
-- Build
-- Unit Testing
-- Docker Image Creation
-- Kubernetes Deployment
-- Helm Release Management
-
----
-
-## 12. Extending the System
-
-You can easily add:
-
-- Additional AI agents
-- Custom tools
-- RAG pipelines
-- Vector databases
-- Human-in-the-loop approval nodes
-- Multi-step workflows
-
-Simply create a new node under:
-
-```bash
-src/latest_ai_development/nodes/
-```
-
-and register it in:
-
-```bash
-graph/graph_builder.py
-```
-
----
-
-## 13. License
-
-This project is licensed under the MIT License.
-
----
-
-## 14. Author
-
-Built using **LangGraph**, **LangChain**, and modern AI engineering best practices.
+- Report persistence is handled in `workflow.py`, which writes the final report to `OUTPUT_DIR/REPORT_OUTPUT_FILE`.
+- LangSmith tracing is initialized during app startup through `tracking.py`.
+- Secret resolution is centralized through `secrets_manager.py` and respects the configured cloud provider.
