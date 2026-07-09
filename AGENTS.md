@@ -195,6 +195,23 @@ These files are workflow-critical and should stay aligned:
 - `src/latest_ai_development/nodes/research_node_builder.py`
 - `src/latest_ai_development/nodes/reporting_node_builder.py`
 
+## Output Persistence
+
+Report-file persistence is controlled by `execution.save_output` in `src/latest_ai_development/config/graph_config.yaml`.
+
+Current default:
+
+- `save_output: false`
+
+This default avoids write failures on deployments that run with `readOnlyRootFilesystem: true`.
+
+If you enable file output:
+
+- point `OUTPUT_DIR` to a writable path such as a mounted volume or `/tmp/output`
+- do not assume `/app/output` is writable in production
+
+If report writing fails at runtime, the workflow logs a warning and still returns the API response instead of failing the request.
+
 ## Extension Guidance
 
 When extending the template:
@@ -205,7 +222,7 @@ When extending the template:
 - keep node outputs aligned with shared state
 - only update `graph/graph_builder.py` if the generic config-driven compiler contract itself changes
 - update `main.py` request/response models if the external contract changes
-- keep report persistence inside `workflow.py`
+- keep any optional report persistence logic inside `workflow.py`
 
 ## Validation
 

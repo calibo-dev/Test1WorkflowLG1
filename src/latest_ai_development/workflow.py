@@ -19,6 +19,7 @@ class LatestAiDevelopmentWorkflow:
         self.settings = get_settings()
         self.graph_config = get_graph_config()
         self.final_output_field = str(self.graph_config.get("final_output_field", "report") or "report")
+        self.save_output = bool(self.graph_config.get("execution", {}).get("save_output", False))
         configure_logging(getattr(self.settings, "log_level", "INFO"))
         self._graph = None
 
@@ -52,14 +53,29 @@ class LatestAiDevelopmentWorkflow:
 
         result = self.get_graph().invoke(self.build_initial_state(topic=topic))
 
-        report = result.get(self.final_output_field, "")
-        if isinstance(report, str) and report.strip():
-            self.settings.report_output_path.write_text(report, encoding="utf-8")
-            logger.info(
-                "Report saved | flow_run_id=%s | output_path=%s",
-                flow_run_id,
-                self.settings.report_output_path,
-            )
+        if self.save_output:
+            report = result.get(self.final_output_field, "")
+            if isinstance(report, str) and report.strip():
+                try:
+                    self.settings.output_dir_path.mkdir(parents=True, exist_ok=True)
+                    self.settings.report_output_path.write_text(report, encoding="utf-8")
+                    logger.info(
+                        "Report saved | flow_run_id=%s | output_path=%s",
+                        flow_run_id,
+                        self.settings.report_output_path,
+                    )
+                except OSError:
+                    logger.warning(
+                        "Report save failed | flow_run_id=%s | output_path=%s",
+                        flow_run_id,
+                        self.settings.report_output_path,
+                        exc_info=True,
+                    )
+            else:
+                logger.warning(
+                    "Report save skipped because no report was produced | flow_run_id=%s",
+                    flow_run_id,
+                )
 
         logger.info("Workflow completed | flow_run_id=%s", flow_run_id)
 

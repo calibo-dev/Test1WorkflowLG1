@@ -263,6 +263,9 @@ uv run --with pytest python -m pytest
 
 ## Notes
 
-- Report persistence is handled in `workflow.py`, which writes the final report to `OUTPUT_DIR/REPORT_OUTPUT_FILE`.
+- Report persistence is controlled by `execution.save_output` in `src/latest_ai_development/config/graph_config.yaml`.
+- The template defaults `execution.save_output` to `false` for safer deployment on read-only container filesystems.
+- If you enable report persistence, set `OUTPUT_DIR` to a writable path such as a mounted volume or `/tmp/output`.
+- If report persistence is enabled but the target path is not writable, `workflow.py` logs a warning instead of failing the `/ask` request.
 - LangSmith tracing is initialized during app startup through `tracking.py`.
 - Secret resolution is centralized through `secrets_manager.py` and respects the configured cloud provider.
