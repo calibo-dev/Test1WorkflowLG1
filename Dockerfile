@@ -48,9 +48,8 @@ RUN chmod -R 755 /app/.venv
 # Activate venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Copy application code and context files
+# Copy application code
 COPY --chown=calibo:calibo src ./src
-COPY --chown=calibo:calibo knowledge ./knowledge
 
 # Create writable directories required by the application
 RUN mkdir -p /app/output /app/.local /app/.cache \
@@ -59,7 +58,6 @@ RUN mkdir -p /app/output /app/.local /app/.cache \
 # Restrictive permissions
 RUN chmod 755 /app \
     && chmod -R 755 /app/src \
-    && chmod -R 755 /app/knowledge \
     && chmod -R 755 /app/output \
     && chmod -R 755 /app/.venv \
     && chmod -R 755 /app/.local \

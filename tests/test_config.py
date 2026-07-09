@@ -99,6 +99,7 @@ def test_graph_config_is_loaded_from_yaml():
 
     assert graph_config["entry_point"] == "validate_input"
     assert graph_config["final_output_field"] == "report"
+    assert graph_config["execution"]["save_output"] is False
     assert "router_agent" in graph_config["nodes"]
     assert graph_config["nodes"]["research"]["builder"].endswith(":ResearchNodeBuilder.build")
 
