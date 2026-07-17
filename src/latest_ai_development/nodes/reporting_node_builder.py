@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage
 from latest_ai_development.config.settings import get_settings
 from latest_ai_development.graph.state import State
 from latest_ai_development.llm.llm_factory import LLMFactory
+from latest_ai_development.logging_utils import summarize_tools
 from latest_ai_development.prompts.prompt_builder import build_reporting_prompt
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,8 @@ class ReportingNodeBuilder:
     def build() -> Callable[[State], dict[str, Any]]:
         logger.info("Building Reporting Node...")
         provider = get_settings().provider.lower()
+        tools: list[Any] = []
+        logger.debug("Reporting Node tools=%s", summarize_tools(tools))
         
         logger.info("Creating LLM for Reporting Node with provider=%s...", provider)
         llm = LLMFactory().create_llm(provider=provider)
@@ -58,21 +61,27 @@ class ReportingNodeBuilder:
         logger.info("Creating Reporting Agent...")
         agent = create_agent(
             model=llm,
-            tools=[],
+            tools=tools,
             system_prompt=prompt,
         )
 
         def reporting_node(state: State, /) -> dict[str, Any]:
-            logger.info(f"Reporting Node received topic: {state.get('topic')}")
+            logger.info("Reporting Node started")
+            logger.debug(
+                "Reporting Node payload | topic_length=%s | research_result_present=%s",
+                len(str(state.get("topic", "")).strip()),
+                bool(str(state.get("research_result", "") or "").strip()),
+            )
             user_message = _build_reporting_message(state)
 
             agent_input = {"messages": [HumanMessage(content=user_message)]}
+            logger.debug("Reporting Node invoking agent")
             result = agent.invoke(cast(Any, agent_input))
 
             report = result["messages"][-1].content
 
             logger.info("Reporting Node completed successfully")
-            logger.debug(f"Generated Report: {report}")
+            logger.debug("Reporting Node output length=%s", len(str(report)))
 
             return {
                 **state,

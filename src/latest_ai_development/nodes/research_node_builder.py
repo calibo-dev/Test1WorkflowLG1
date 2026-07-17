@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage
 from latest_ai_development.config.settings import get_settings
 from latest_ai_development.graph.state import State
 from latest_ai_development.llm.llm_factory import LLMFactory
+from latest_ai_development.logging_utils import summarize_tools
 from latest_ai_development.prompts.prompt_builder import build_research_prompt
 
 
@@ -43,6 +44,8 @@ class ResearchNodeBuilder:
     def build() -> Callable[[State], dict[str, Any]]:
         logger.info("Building Research Node...")
         provider = get_settings().provider.lower()
+        tools: list[Any] = []
+        logger.debug("Research Node tools=%s", summarize_tools(tools))
 
         logger.info("Creating LLM for Research Node with provider=%s...", provider)
         llm = LLMFactory().create_llm(provider=provider)
@@ -53,14 +56,20 @@ class ResearchNodeBuilder:
         logger.info("Creating Research Agent...")
         agent = create_agent(
             model=llm,
-            tools=[],
+            tools=tools,
             system_prompt=system_prompt,
         )
 
         def research_node(state: State, /) -> dict[str, Any]:
-            logger.info(f"Research Node received topic: {state['topic']}")
+            logger.info("Research Node started")
+            logger.debug(
+                "Research Node payload | topic_length=%s | agent_plan_count=%s",
+                len(str(state.get("topic", "")).strip()),
+                len(state.get("agent_plan", [])),
+            )
 
             agent_input = {"messages": [HumanMessage(content=_build_research_message(state))]}
+            logger.debug("Research Node invoking agent")
             result = agent.invoke(cast(Any, agent_input))
 
             if isinstance(result, dict) and "messages" in result:
@@ -68,7 +77,8 @@ class ResearchNodeBuilder:
             else:
                 research_result = getattr(result, "content", str(result))
 
-            logger.info(f"Research Node produced result: {research_result}")
+            logger.info("Research Node completed")
+            logger.debug("Research Node output length=%s", len(str(research_result)))
 
             return {
                 **state,
