@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage
 from latest_ai_development.config.settings import get_settings
 from latest_ai_development.graph.state import State
 from latest_ai_development.llm.llm_factory import LLMFactory
+from latest_ai_development.logging_utils import summarize_tools
 from latest_ai_development.prompts.prompt_builder import build_router_prompt
 
 
@@ -86,6 +87,7 @@ class OrchestrationNodeBuilder:
     @staticmethod
     def route_after_router_agent(state: State) -> str:
         if state.get("errors"):
+            logger.info("Router routing to finalize_output because errors are present")
             return "finalize_output"
 
         enabled_agents = {
@@ -93,18 +95,23 @@ class OrchestrationNodeBuilder:
             for agent in state.get("agent_plan", [])
             if agent.get("enabled", True)
         }
+        logger.debug("Router enabled agents=%s", sorted(enabled_agents))
 
         if "research" in enabled_agents:
+            logger.info("Router selected research")
             return "research"
 
         if "reporting" in enabled_agents:
+            logger.info("Router selected reporting")
             return "reporting"
 
+        logger.info("Router selected finalize_output because no enabled agents remain")
         return "finalize_output"
 
     @staticmethod
     def route_after_research(state: State) -> str:
         if state.get("errors"):
+            logger.info("Research router routing to finalize_output because errors are present")
             return "finalize_output"
 
         enabled_agents = {
@@ -112,10 +119,13 @@ class OrchestrationNodeBuilder:
             for agent in state.get("agent_plan", [])
             if agent.get("enabled", True)
         }
+        logger.debug("Research router enabled agents=%s", sorted(enabled_agents))
 
         if "reporting" in enabled_agents:
+            logger.info("Research router selected reporting")
             return "reporting"
 
+        logger.info("Research router selected finalize_output because reporting is disabled")
         return "finalize_output"
 
     @staticmethod
@@ -126,6 +136,11 @@ class OrchestrationNodeBuilder:
 
             topic = state.get("topic", "")
             errors = list(state.get("errors", []))
+            logger.debug(
+                "Validate Input payload | topic_length=%s | existing_error_count=%s",
+                len(topic.strip()) if isinstance(topic, str) else 0,
+                len(errors),
+            )
 
             if not isinstance(topic, str) or not topic.strip():
                 errors.append("topic is required")
@@ -143,6 +158,8 @@ class OrchestrationNodeBuilder:
     def build_router_agent() -> Callable[[State], dict[str, Any]]:
         logger.info("Building Router Agent Node...")
         provider = get_settings().provider.lower()
+        tools: list[Any] = []
+        logger.debug("Router Agent tools=%s", summarize_tools(tools))
 
         logger.info("Creating LLM for Router Agent with provider=%s...", provider)
         llm = LLMFactory().create_llm(provider=provider)
@@ -153,7 +170,7 @@ class OrchestrationNodeBuilder:
         logger.info("Creating Router Agent...")
         agent = create_agent(
             model=llm,
-            tools=[],
+            tools=tools,
             system_prompt=system_prompt,
         )
 
@@ -169,10 +186,15 @@ class OrchestrationNodeBuilder:
                 }
 
             agent_input = {"messages": [HumanMessage(content=f"Topic:\n{state['topic']}")]}
+            logger.debug(
+                "Router Agent invoking model | topic_length=%s",
+                len(str(state.get("topic", "")).strip()),
+            )
             result = agent.invoke(agent_input)
             parsed_agent_plan = OrchestrationNodeBuilder._parse_router_result(result)
 
             logger.info("Router Agent node completed with %s agent(s)", len(parsed_agent_plan))
+            logger.debug("Router Agent parsed plan=%s", parsed_agent_plan)
 
             return {
                 **state,
@@ -189,9 +211,15 @@ class OrchestrationNodeBuilder:
 
             errors = list(state.get("errors", []))
             report = state.get("report", "")
+            logger.debug(
+                "Finalize Output payload | error_count=%s | report_present=%s",
+                len(errors),
+                bool(str(report or "").strip()),
+            )
 
             if errors and not report:
                 report = f"Error: {'; '.join(errors)}"
+                logger.info("Finalize Output synthesized report from errors")
 
             logger.info("Finalize Output node completed")
 
