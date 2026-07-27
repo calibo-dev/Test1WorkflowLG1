@@ -95,3 +95,12 @@ def test_workflow_kickoff_logs_warning_when_report_write_fails(monkeypatch, tmp_
 
     assert result["report"] == "generated report"
     assert "Report save failed" in caplog.text
+
+
+def test_workflow_initial_state_preserves_agent_plan_shape_for_tool_wiring():
+    workflow = LatestAiDevelopmentWorkflow()
+
+    initial_state = workflow.build_initial_state(topic="LangGraph")
+
+    assert initial_state["agent_plan"] == []
+    assert initial_state["errors"] == []
