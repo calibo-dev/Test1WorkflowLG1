@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     app_env: str = Field(default="dev", alias="APP_ENV")
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    langsmith_tracing: bool = Field(default=False, alias="LANGSMITH_TRACING")
 
     provider: str = Field(default="OLLAMA", alias="PROVIDER")
 
@@ -90,6 +91,21 @@ class Settings(BaseSettings):
             if normalized in {"1", "true", "yes", "on", "debug"}:
                 return True
             if normalized in {"0", "false", "no", "off", "release", "prod", "production", ""}:
+                return False
+
+        return bool(value)
+
+    @field_validator("langsmith_tracing", mode="before")
+    @classmethod
+    def parse_langsmith_tracing_value(cls, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off", ""}:
                 return False
 
         return bool(value)
