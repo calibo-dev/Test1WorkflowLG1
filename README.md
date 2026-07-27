@@ -171,16 +171,19 @@ Typical API key configuration:
 
 ## Observability and Tracing
 
-- LangSmith tracing is required for this template
-- the template enables LangSmith during FastAPI app startup
-- if LangSmith credentials are missing, startup fails
+- LangSmith tracing is controlled by `LANGSMITH_TRACING`
+- if `LANGSMITH_TRACING=true`, the template enables LangSmith during FastAPI app startup and valid LangSmith credentials are required
+- if `LANGSMITH_TRACING=false`, tracing is disabled, a log message is emitted, and startup continues normally
 
 LangSmith configuration:
 
+- enable tracing with `LANGSMITH_TRACING=true`
+- disable tracing with `LANGSMITH_TRACING=false`
 - API key can come from:
   - `LANGSMITH_API_KEY`
   - `LANGSMITH_API_KEY_SECRET`
 - project name can be provided with `LANGSMITH_PROJECT`
+- endpoint can be provided with `LANGSMITH_ENDPOINT`
 
 Startup order is:
 
@@ -267,5 +270,5 @@ uv run --with pytest python -m pytest
 - The template defaults `execution.save_output` to `false` for safer deployment on read-only container filesystems.
 - If you enable report persistence, set `OUTPUT_DIR` to a writable path such as a mounted volume or `/tmp/output`.
 - If report persistence is enabled but the target path is not writable, `workflow.py` logs a warning instead of failing the `/ask` request.
-- LangSmith tracing is initialized during app startup through `tracking.py`.
+- LangSmith tracing is initialized during app startup through `tracking.py` only when `LANGSMITH_TRACING=true`.
 - Secret resolution is centralized through `secrets_manager.py` and respects the configured cloud provider.

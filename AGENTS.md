@@ -147,10 +147,14 @@ App startup currently performs:
 5. LangSmith tracing initialization through `tracking.py` during FastAPI lifespan startup
 6. FastAPI app startup
 
-If tracing credentials are missing, startup fails fast rather than running in a partially configured state.
+LangSmith tracing is controlled by `LANGSMITH_TRACING`.
+
+- If `LANGSMITH_TRACING=true`, startup requires valid LangSmith credentials.
+- If `LANGSMITH_TRACING=false`, startup continues with tracing disabled.
 
 LangSmith inputs:
 
+- `LANGSMITH_TRACING`
 - `LANGSMITH_API_KEY`
 - `LANGSMITH_API_KEY_SECRET`
 - `LANGSMITH_PROJECT`

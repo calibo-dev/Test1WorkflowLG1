@@ -26,9 +26,10 @@ def initialize_langsmith_tracing() -> None:
     """
     Initialize LangSmith tracing for this template.
 
-    LangSmith credentials are required. If configuration is missing or invalid,
-    initialization fails fast so the app does not start in a partially configured
-    state.
+    LangSmith tracing is controlled by LANGSMITH_TRACING.
+
+    - When LANGSMITH_TRACING=false, tracing is disabled and startup continues.
+    - When LANGSMITH_TRACING=true, valid LangSmith credentials are required.
     """
     global _LANGSMITH_INITIALIZED
 
@@ -38,12 +39,24 @@ def initialize_langsmith_tracing() -> None:
         return
 
     settings = get_settings()
-    api_key = _resolve_langsmith_api_key()
-    if not api_key:
-        os.environ.pop("LANGSMITH_TRACING", None)
+    if not settings.langsmith_tracing:
+        os.environ["LANGSMITH_TRACING"] = "false"
+        logger.info("LangSmith tracing disabled by configuration")
+        return
+
+    try:
+        api_key = _resolve_langsmith_api_key()
+    except Exception as exc:
+        os.environ["LANGSMITH_TRACING"] = "false"
         raise ValueError(
-            "LANGSMITH_API_KEY or LANGSMITH_API_KEY_SECRET must be configured "
-            "for this template."
+            "LANGSMITH_TRACING is enabled, but LangSmith credentials could not be resolved."
+        ) from exc
+
+    if not api_key:
+        os.environ["LANGSMITH_TRACING"] = "false"
+        raise ValueError(
+            "LANGSMITH_TRACING is enabled, but LANGSMITH_API_KEY or "
+            "LANGSMITH_API_KEY_SECRET is not configured."
         )
 
     os.environ["LANGSMITH_API_KEY"] = api_key
