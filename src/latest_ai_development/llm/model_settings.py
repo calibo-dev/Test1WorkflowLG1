@@ -49,17 +49,46 @@ def _resolve_required_api_key(
     return api_key
 
 
-def get_model_settings(provider_name: str | None = None) -> ModelSettings:
+def _get_provider_section_config(
+    providers: dict[str, Any],
+    *,
+    provider: str,
+    section: str,
+) -> tuple[str, dict[str, Any]]:
+    provider_cfg = providers.get(provider)
+    if not isinstance(provider_cfg, dict):
+        raise ValueError(f"Provider '{provider}' not configured in models.yaml")
+
+    if section == "primary":
+        return provider, provider_cfg
+
+    if section != "fallback":
+        raise ValueError(f"Unsupported model settings section '{section}'.")
+
+    fallback_cfg = provider_cfg.get("fallback")
+    if not fallback_cfg:
+        raise ValueError(f"Provider '{provider}' does not define a fallback model in models.yaml")
+    if not isinstance(fallback_cfg, dict):
+        raise ValueError(f"Provider '{provider}' fallback must be a mapping in models.yaml")
+
+    fallback_provider = normalize_provider_name(fallback_cfg.get("provider") or provider)
+    merged_cfg = dict(fallback_cfg)
+    merged_cfg.pop("provider", None)
+    return fallback_provider, merged_cfg
+
+
+def get_model_settings(provider_name: str | None = None, *, section: str = "primary") -> ModelSettings:
     settings = get_settings()
     models_cfg = get_models_config()
     secrets_manager = SecretsManager()
 
     provider = normalize_provider_name(provider_name or settings.provider)
     providers = models_cfg.get("providers", {})
-    provider_cfg = providers.get(provider)
-
-    if not isinstance(provider_cfg, dict):
-        raise ValueError(f"Provider '{provider}' not configured in models.yaml")
+    resolved_provider, provider_cfg = _get_provider_section_config(
+        providers,
+        provider=provider,
+        section=section,
+    )
 
     model_name = str(
         provider_cfg.get("chat_model")
@@ -67,11 +96,11 @@ def get_model_settings(provider_name: str | None = None) -> ModelSettings:
         or ""
     ).strip()
     if not model_name:
-        raise ValueError(f"Provider '{provider}' must define chat_model in models.yaml")
+        raise ValueError(f"Provider '{resolved_provider}' must define chat_model in models.yaml")
 
     extra: dict[str, Any] = {}
 
-    if provider == "openai":
+    if resolved_provider == "openai":
         api_key = _resolve_required_api_key(
             direct_value=settings.openai_api_key,
             secret_name=settings.openai_api_key_secret,
@@ -79,7 +108,7 @@ def get_model_settings(provider_name: str | None = None) -> ModelSettings:
         )
         extra["api_key"] = api_key
 
-    elif provider == "anthropicai":
+    elif resolved_provider == "anthropicai":
         api_key = _resolve_required_api_key(
             direct_value=settings.anthropicai_api_key,
             secret_name=settings.anthropicai_api_key_secret,
@@ -87,7 +116,7 @@ def get_model_settings(provider_name: str | None = None) -> ModelSettings:
         )
         extra["api_key"] = api_key
 
-    elif provider == "geminiai":
+    elif resolved_provider == "geminiai":
         api_key = _resolve_required_api_key(
             direct_value=settings.geminiai_api_key,
             secret_name=settings.geminiai_api_key_secret,
@@ -95,19 +124,35 @@ def get_model_settings(provider_name: str | None = None) -> ModelSettings:
         )
         extra["api_key"] = api_key
 
-    elif provider == "ollama":
+    elif resolved_provider == "ollama":
         extra["base_url"] = settings.ollama_base_url
 
     else:
         raise ValueError(
-            f"Unsupported provider '{provider}'. Supported providers: {sorted(providers.keys())}"
+            f"Unsupported provider '{resolved_provider}'. Supported providers: {sorted(providers.keys())}"
         )
 
     return ModelSettings(
-        provider=provider,
+        provider=resolved_provider,
         model=model_name,
         temperature=float(provider_cfg.get("temperature", 0.3)),
         top_p=float(provider_cfg.get("top_p", 1.0)),
         max_tokens=int(provider_cfg.get("max_tokens", 2000)),
         extra=extra,
     )
+
+
+def get_fallback_model_settings(provider_name: str | None = None) -> list[ModelSettings]:
+    settings = get_settings()
+    models_cfg = get_models_config()
+    provider = normalize_provider_name(provider_name or settings.provider)
+    providers = models_cfg.get("providers", {})
+    provider_cfg = providers.get(provider)
+
+    if not isinstance(provider_cfg, dict):
+        raise ValueError(f"Provider '{provider}' not configured in models.yaml")
+
+    if not provider_cfg.get("fallback"):
+        return []
+
+    return [get_model_settings(provider, section="fallback")]

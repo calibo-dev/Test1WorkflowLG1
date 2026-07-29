@@ -95,6 +95,13 @@ LLM setup follows this path:
 
 The node builders should not hardcode model defaults. Provider selection comes from `Settings`, and per-provider model metadata comes from `models.yaml`.
 
+## Model Fallback
+
+- `src/latest_ai_development/config/models.yaml` may define an optional `fallback` block under the active provider.
+- Active agent-backed nodes keep the primary model in `create_agent(...)` and wire fallback models through LangChain `ModelFallbackMiddleware`.
+- `src/latest_ai_development/llm/model_attempt_logging.py` adds attempt-level logging for the primary model and each fallback retry.
+- Fallback is a model-call concern only; it must not be implemented as graph topology, router branching, or extra workflow nodes.
+
 ## Secrets and Runtime Variables
 
 Deployment/runtime variables are resolved centrally in `config/settings.py` and then consumed by the app runtime.

@@ -12,7 +12,16 @@ from langchain_core.messages import HumanMessage
 
 from latest_ai_development.config.settings import get_settings
 from latest_ai_development.graph.state import State
-from latest_ai_development.llm.llm_factory import LLMFactory
+from latest_ai_development.llm.llm_factory import LLMFactory, get_fallback_llms
+from latest_ai_development.llm.model_attempt_logging import (
+    LoggedModelFallbackMiddleware,
+    ModelAttemptLoggingMiddleware,
+    get_model_attempts,
+)
+from latest_ai_development.llm.model_settings import (
+    get_fallback_model_settings,
+    get_model_settings,
+)
 from latest_ai_development.logging_utils import summarize_tools
 from latest_ai_development.prompts.prompt_builder import build_research_prompt
 
@@ -49,6 +58,26 @@ class ResearchNodeBuilder:
 
         logger.info("Creating LLM for Research Node with provider=%s...", provider)
         llm = LLMFactory().create_llm(provider=provider)
+        primary_settings = get_model_settings(provider)
+        fallback_settings = get_fallback_model_settings(provider)
+        primary_attempt, fallback_attempts = get_model_attempts(
+            "research",
+            primary_settings,
+            fallback_settings,
+        )
+        fallback_llms = get_fallback_llms(provider)
+        middleware = []
+        if fallback_llms:
+            middleware.append(
+                LoggedModelFallbackMiddleware(
+                    primary_attempt,
+                    fallback_attempts,
+                    fallback_llms[0],
+                    *fallback_llms[1:],
+                )
+            )
+        else:
+            middleware.append(ModelAttemptLoggingMiddleware(primary_attempt))
 
         logger.info("Building Research Prompt...")
         system_prompt = build_research_prompt()
@@ -58,6 +87,7 @@ class ResearchNodeBuilder:
             model=llm,
             tools=tools,
             system_prompt=system_prompt,
+            middleware=middleware,
         )
 
         def research_node(state: State, /) -> dict[str, Any]:

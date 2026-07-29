@@ -8,6 +8,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from latest_ai_development.llm.model_settings import (
     ModelSettings,
+    get_fallback_model_settings,
     get_model_settings,
 )
 
@@ -26,7 +27,7 @@ class LLMFactory:
     - Steps should call LLMFactory().create_llm().
     """
 
-    def create_llm(self, provider: str | None = None) -> BaseChatModel:
+    def create_llm(self, provider: str | None = None, *, section: str = "primary") -> BaseChatModel:
         """
         Resolve settings from centralized config and create the model.
 
@@ -36,7 +37,7 @@ class LLMFactory:
         - Gemini
         - Ollama
         """
-        settings = get_model_settings(provider_name=provider)
+        settings = get_model_settings(provider_name=provider, section=section)
         return self.create(settings)
 
     def create(self, model_settings: ModelSettings) -> BaseChatModel:
@@ -103,3 +104,8 @@ class LLMFactory:
             )
 
         raise ValueError(f"Unsupported provider: {provider}")
+
+
+def get_fallback_llms(provider: str | None = None) -> list[BaseChatModel]:
+    factory = LLMFactory()
+    return [factory.create(settings) for settings in get_fallback_model_settings(provider)]
