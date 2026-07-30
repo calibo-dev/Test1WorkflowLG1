@@ -24,6 +24,7 @@ from latest_ai_development.llm.model_settings import (
 )
 from latest_ai_development.logging_utils import summarize_tools
 from latest_ai_development.prompts.prompt_builder import build_research_prompt
+from latest_ai_development.tools.tool_registry import get_tools_for_agent
 
 
 
@@ -53,8 +54,6 @@ class ResearchNodeBuilder:
     def build() -> Callable[[State], dict[str, Any]]:
         logger.info("Building Research Node...")
         provider = get_settings().provider.lower()
-        tools: list[Any] = []
-        logger.debug("Research Node tools=%s", summarize_tools(tools))
 
         logger.info("Creating LLM for Research Node with provider=%s...", provider)
         llm = LLMFactory().create_llm(provider=provider)
@@ -92,12 +91,20 @@ class ResearchNodeBuilder:
 
         def research_node(state: State, /) -> dict[str, Any]:
             logger.info("Research Node started")
+            tools = get_tools_for_agent(state.get("agent_plan", []), agent_id="research")
+            logger.debug("Research Node tools=%s", summarize_tools(tools))
             logger.debug(
                 "Research Node payload | topic_length=%s | agent_plan_count=%s",
                 len(str(state.get("topic", "")).strip()),
                 len(state.get("agent_plan", [])),
             )
 
+            logger.info("Creating Research Agent...")
+            agent = create_agent(
+                model=llm,
+                tools=tools,
+                system_prompt=system_prompt,
+            )
             agent_input = {"messages": [HumanMessage(content=_build_research_message(state))]}
             logger.debug("Research Node invoking agent")
             result = agent.invoke(cast(Any, agent_input))
