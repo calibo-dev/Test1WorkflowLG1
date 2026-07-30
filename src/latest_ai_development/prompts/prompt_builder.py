@@ -26,8 +26,8 @@ Instructions:
 - Use the schema:
   {
     "agent_plan": [
-      {"id": "research", "enabled": true, "role": "Research agent"},
-      {"id": "reporting", "enabled": true, "role": "Reporting agent"}
+      {"id": "research", "name": "Research agent", "enabled": true, "role": "Research agent", "tools": []},
+      {"id": "reporting", "name": "Reporting agent", "enabled": true, "role": "Reporting agent", "tools": []}
     ]
   }
 - Prefer enabling both agents for general topics.

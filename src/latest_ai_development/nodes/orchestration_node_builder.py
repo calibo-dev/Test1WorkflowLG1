@@ -24,13 +24,17 @@ class OrchestrationNodeBuilder:
         return [
             {
                 "id": "research",
+                "name": "Research agent",
                 "enabled": True,
                 "role": "Research agent",
+                "tools": [],
             },
             {
                 "id": "reporting",
+                "name": "Reporting agent",
                 "enabled": True,
                 "role": "Reporting agent",
+                "tools": [],
             },
         ]
 
@@ -51,8 +55,14 @@ class OrchestrationNodeBuilder:
             normalized_agent_plan.append(
                 {
                     "id": agent_id,
+                    "name": str(raw_agent.get("name", "") or ""),
                     "enabled": bool(raw_agent.get("enabled", True)),
                     "role": str(raw_agent.get("role", "") or ""),
+                    "tools": [
+                        str(tool_name).strip()
+                        for tool_name in (raw_agent.get("tools", []) or [])
+                        if isinstance(tool_name, str) and tool_name.strip()
+                    ],
                 }
             )
 
