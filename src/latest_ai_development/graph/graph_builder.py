@@ -7,6 +7,7 @@ from langgraph.graph import END, StateGraph
 
 from latest_ai_development.config.settings import get_graph_config
 from latest_ai_development.graph.state import State
+from latest_ai_development.tracking import trace_node_execution
 
 
 class GraphBuilder:
@@ -37,6 +38,13 @@ class GraphBuilder:
         return node_callable
 
     @staticmethod
+    def _wrap_node(node_id: str, node_callable):
+        def wrapped_node(state):
+            return trace_node_execution(node_id, node_callable, state=state)
+
+        return wrapped_node
+
+    @staticmethod
     def _resolve_target(target: str):
         return END if target == "END" else target
 
@@ -46,7 +54,10 @@ class GraphBuilder:
         workflow = StateGraph(State)
         for node_id, node_cfg in graph_cfg["nodes"].items():
             node_callable = GraphBuilder._resolve_node_callable(node_cfg["builder"])
-            workflow.add_node(node_id, cast(Any, node_callable))
+            workflow.add_node(
+                node_id,
+                cast(Any, GraphBuilder._wrap_node(node_id, node_callable)),
+            )
 
         workflow.set_entry_point(str(graph_cfg["entry_point"]))
 

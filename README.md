@@ -12,7 +12,7 @@ The template now uses a centralized configuration layer:
 - `src/latest_ai_development/config/models.yaml`
   Declares provider-specific model defaults.
 - `src/latest_ai_development/config/graph_config.yaml`
-  Declares graph topology, entry point, edges, conditional routes, and the final output field.
+  Declares graph topology, entry point, edges, conditional routes, tracing overrides, and the final output field.
 - `src/latest_ai_development/config/validators.py`
   Validates provider and cloud-secret configuration during startup.
 - `src/latest_ai_development/workflow.py`
@@ -105,6 +105,7 @@ Common values:
 - `API_ROOT_PATH`
 - `OUTPUT_DIR`
 - `REPORT_OUTPUT_FILE`
+- `TRACING_BACKEND`
 - `LANGSMITH_API_KEY` or `LANGSMITH_API_KEY_SECRET`
 - `LANGSMITH_PROJECT`
 - `CLOUD_PROVIDER`
@@ -171,16 +172,32 @@ Typical API key configuration:
 
 ## Observability and Tracing
 
-- LangSmith tracing is required for this template
-- the template enables LangSmith during FastAPI app startup
-- if LangSmith credentials are missing, startup fails
+- LangSmith tracing is optional for this template
+- tracing is controlled through `TRACING_BACKEND`
+- the template enables LangSmith during FastAPI app startup only when `TRACING_BACKEND=LANGSMITH`
+- if LangSmith initialization fails, the app falls back to no tracing and continues to start
 
 LangSmith configuration:
 
+- set `TRACING_BACKEND=LANGSMITH` to enable LangSmith tracing
+- leave `TRACING_BACKEND` unset, or set `TRACING_BACKEND=NONE`, to run without tracing
 - API key can come from:
   - `LANGSMITH_API_KEY`
+  - `LANGCHAIN_API_KEY`
   - `LANGSMITH_API_KEY_SECRET`
+  - `LANGCHAIN_API_KEY_SECRET`
 - project name can be provided with `LANGSMITH_PROJECT`
+- workflow and node trace shapes can be customized in `src/latest_ai_development/config/graph_config.yaml` under `tracing.workflow` and `tracing.nodes`
+
+Supported tracing config fields in `graph_config.yaml`:
+
+- `enabled`
+- `name`
+- `run_type`
+- `tags`
+- `metadata`
+- `input_fields`
+- `output_fields`
 
 Startup order is:
 
@@ -190,7 +207,7 @@ Startup order is:
    - verifies the selected provider exists in `models.yaml`
    - resolves the selected provider credentials before the app starts serving requests
 4. initialize workflow controller
-5. initialize LangSmith tracing during app lifespan
+5. initialize tracing during app lifespan
 6. serve FastAPI routes
 
 ## YAML-First Topology Changes

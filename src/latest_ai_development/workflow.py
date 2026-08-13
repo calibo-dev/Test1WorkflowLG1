@@ -8,6 +8,7 @@ from latest_ai_development.config.settings import get_graph_config, get_settings
 from latest_ai_development.graph.graph_builder import GraphBuilder
 from latest_ai_development.graph.state import State
 from latest_ai_development.logging_utils import configure_logging
+from latest_ai_development.tracking import trace_workflow_execution
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,13 @@ class LatestAiDevelopmentWorkflow:
             topic,
         )
 
-        result = self.get_graph().invoke(self.build_initial_state(topic=topic))
+        initial_state = self.build_initial_state(topic=topic)
+        result = trace_workflow_execution(
+            self.get_graph().invoke,
+            flow_run_id=flow_run_id,
+            inputs=inputs,
+            initial_state=initial_state,
+        )
 
         report = result.get(self.final_output_field, "")
         if isinstance(report, str) and report.strip():
