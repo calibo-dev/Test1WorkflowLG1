@@ -10,7 +10,10 @@ from langgraph.graph import END, StateGraph
 
 from latest_ai_development.config.settings import get_graph_config
 from latest_ai_development.graph.state import State
+from latest_ai_development.logging_utils import summarize_state_delta, summarize_state_keys
 from latest_ai_development.tracking import trace_node_execution
+
+logger = logging.getLogger(__name__)
 
 
 class GraphBuilder:

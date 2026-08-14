@@ -7,7 +7,7 @@ from uuid import uuid4
 from latest_ai_development.config.settings import get_graph_config, get_settings
 from latest_ai_development.graph.graph_builder import GraphBuilder
 from latest_ai_development.graph.state import State
-from latest_ai_development.logging_utils import configure_logging
+from latest_ai_development.logging_utils import configure_logging, summarize_state_keys
 from latest_ai_development.tracking import trace_workflow_execution
 
 logger = logging.getLogger(__name__)
