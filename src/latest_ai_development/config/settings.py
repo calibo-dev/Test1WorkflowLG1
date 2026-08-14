@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     langsmith_api_key_secret: str = Field(default="", alias="LANGSMITH_API_KEY_SECRET")
     langsmith_endpoint: str = Field(default="", alias="LANGSMITH_ENDPOINT")
     langsmith_project: str = Field(default="", alias="LANGSMITH_PROJECT")
+    tracing_backend: str = Field(default="NONE", alias="TRACING_BACKEND")
 
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
 

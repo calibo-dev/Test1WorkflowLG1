@@ -59,6 +59,8 @@ class ReportingNodeBuilder:
     def build() -> Callable[[State], dict[str, Any]]:
         logger.info("Building Reporting Node...")
         provider = get_settings().provider.lower()
+        tools: list[Any] = []
+        logger.debug("Reporting Node initial tools=%s", summarize_tools(tools))
 
         logger.info("Creating LLM for Reporting Node with provider=%s...", provider)
         llm = LLMFactory().create_llm(provider=provider)

@@ -11,7 +11,7 @@ from langgraph.graph import END, StateGraph
 from latest_ai_development.config.settings import get_graph_config
 from latest_ai_development.graph.state import State
 from latest_ai_development.logging_utils import summarize_state_delta, summarize_state_keys
-
+from latest_ai_development.tracking import trace_node_execution
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,13 @@ class GraphBuilder:
         if not callable(node_callable):
             raise TypeError(f"Builder '{reference}' did not return a callable node")
         return node_callable
+
+    @staticmethod
+    def _wrap_node(node_id: str, node_callable):
+        def wrapped_node(state):
+            return trace_node_execution(node_id, node_callable, state=state)
+
+        return wrapped_node
 
     @staticmethod
     def _resolve_target(target: str):
@@ -126,7 +133,10 @@ class GraphBuilder:
                 node_cfg["builder"],
             )
             node_callable = GraphBuilder._resolve_node_callable(node_cfg["builder"])
-            workflow.add_node(node_id, cast(Any, GraphBuilder._wrap_node_callable(node_id, node_callable)))
+            workflow.add_node(
+                node_id,
+                cast(Any, GraphBuilder._wrap_node(node_id, node_callable)),
+            )
 
         workflow.set_entry_point(str(graph_cfg["entry_point"]))
         logger.info("Graph entry point registered | entry_point=%s", graph_cfg["entry_point"])

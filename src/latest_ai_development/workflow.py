@@ -8,6 +8,7 @@ from latest_ai_development.config.settings import get_graph_config, get_settings
 from latest_ai_development.graph.graph_builder import GraphBuilder
 from latest_ai_development.graph.state import State
 from latest_ai_development.logging_utils import configure_logging, summarize_state_keys
+from latest_ai_development.tracking import trace_workflow_execution
 
 logger = logging.getLogger(__name__)
 
@@ -65,42 +66,21 @@ class LatestAiDevelopmentWorkflow:
         )
 
         initial_state = self.build_initial_state(topic=topic)
-        logger.debug(
-            "Invoking graph | flow_run_id=%s | initial_state_keys=%s",
-            flow_run_id,
-            summarize_state_keys(initial_state),
-        )
-        result = self.get_graph().invoke(initial_state)
-        logger.debug(
-            "Graph invocation completed | flow_run_id=%s | result_keys=%s | final_output_present=%s",
-            flow_run_id,
-            summarize_state_keys(result),
-            bool(str(result.get(self.final_output_field, "") or "").strip()),
+        result = trace_workflow_execution(
+            self.get_graph().invoke,
+            flow_run_id=flow_run_id,
+            inputs=inputs,
+            initial_state=initial_state,
         )
 
-        if self.save_output:
-            report = result.get(self.final_output_field, "")
-            if isinstance(report, str) and report.strip():
-                try:
-                    self.settings.output_dir_path.mkdir(parents=True, exist_ok=True)
-                    self.settings.report_output_path.write_text(report, encoding="utf-8")
-                    logger.info(
-                        "Report saved | flow_run_id=%s | output_path=%s",
-                        flow_run_id,
-                        self.settings.report_output_path,
-                    )
-                except OSError:
-                    logger.warning(
-                        "Report save failed | flow_run_id=%s | output_path=%s",
-                        flow_run_id,
-                        self.settings.report_output_path,
-                        exc_info=True,
-                    )
-            else:
-                logger.warning(
-                    "Report save skipped because no report was produced | flow_run_id=%s",
-                    flow_run_id,
-                )
+        report = result.get(self.final_output_field, "")
+        if isinstance(report, str) and report.strip():
+            self.settings.report_output_path.write_text(report, encoding="utf-8")
+            logger.info(
+                "Report saved | flow_run_id=%s | output_path=%s",
+                flow_run_id,
+                self.settings.report_output_path,
+            )
 
         logger.info("Workflow completed | flow_run_id=%s", flow_run_id)
 
