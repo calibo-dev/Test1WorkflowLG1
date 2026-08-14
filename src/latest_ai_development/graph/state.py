@@ -1,6 +1,4 @@
-from typing import TypedDict, List
-
-from typing import TypedDict, List
+from typing import TypedDict
 
 class AgentConfig(TypedDict, total=False):
     """
@@ -8,8 +6,10 @@ class AgentConfig(TypedDict, total=False):
     """
 
     id: str
+    name: str
     enabled: bool
     role: str
+    tools: list[str]
 
 
 class State(TypedDict):

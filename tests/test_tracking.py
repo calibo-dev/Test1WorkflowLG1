@@ -9,6 +9,7 @@ import latest_ai_development.tracking as tracking_module
 def test_initialize_langsmith_tracing_is_idempotent(monkeypatch):
     monkeypatch.setenv("TRACING_BACKEND", "LANGSMITH")
     monkeypatch.setenv("LANGSMITH_API_KEY", "test-key")
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
     monkeypatch.setenv("LANGSMITH_PROJECT", "test-project")
     monkeypatch.setattr(tracking_module, "_LANGSMITH_INITIALIZED", False)
 

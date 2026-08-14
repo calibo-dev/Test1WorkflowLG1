@@ -10,7 +10,7 @@ The template now uses a centralized configuration layer:
 - `src/latest_ai_development/config/settings.py`
   Reads environment variables with `BaseSettings`, normalizes provider and API root-path values, and manages output paths.
 - `src/latest_ai_development/config/models.yaml`
-  Declares provider-specific model defaults.
+  Declares provider-specific model defaults plus optional fallback model configuration.
 - `src/latest_ai_development/config/graph_config.yaml`
   Declares graph topology, entry point, edges, conditional routes, tracing overrides, and the final output field.
 - `src/latest_ai_development/config/validators.py`
@@ -114,6 +114,33 @@ Common values:
 
 Model defaults come from `src/latest_ai_development/config/models.yaml`, not from hardcoded values in the graph or node files.
 Graph topology comes from `src/latest_ai_development/config/graph_config.yaml`, not from hardcoded edges inside `graph_builder.py`.
+
+## Model Fallback
+
+The active LangGraph agent nodes follow the LangChain middleware fallback pattern.
+
+- The primary model is still passed directly into `create_agent(...)`.
+- Optional fallback models are provided through `ModelFallbackMiddleware`.
+- Fallback retries happen at the model-call layer only; they do not add graph edges or retry nodes.
+
+Example:
+
+```yaml
+default_provider: openai
+
+providers:
+  openai:
+    chat_model: gpt-4.1-mini
+    temperature: 0.3
+    top_p: 1.0
+    max_tokens: 2000
+    fallback:
+      provider: openai
+      chat_model: gpt-4.1-nano
+      temperature: 0.3
+      top_p: 1.0
+      max_tokens: 2000
+```
 
 These deployment/runtime values are handled through centralized settings and then consumed by the runtime:
 
@@ -280,6 +307,9 @@ uv run --with pytest python -m pytest
 
 ## Notes
 
-- Report persistence is handled in `workflow.py`, which writes the final report to `OUTPUT_DIR/REPORT_OUTPUT_FILE`.
-- LangSmith tracing is initialized during app startup through `tracking.py`.
+- Report persistence is controlled by `execution.save_output` in `src/latest_ai_development/config/graph_config.yaml`.
+- The template defaults `execution.save_output` to `false` for safer deployment on read-only container filesystems.
+- If you enable report persistence, set `OUTPUT_DIR` to a writable path such as a mounted volume or `/tmp/output`.
+- If report persistence is enabled but the target path is not writable, `workflow.py` logs a warning instead of failing the `/ask` request.
+- LangSmith tracing is initialized during app startup through `tracking.py` only when `LANGSMITH_TRACING=true`.
 - Secret resolution is centralized through `secrets_manager.py` and respects the configured cloud provider.

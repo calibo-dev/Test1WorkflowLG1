@@ -1,6 +1,9 @@
 entry_point: validate_input
 final_output_field: report
 
+execution:
+  save_output: false
+
 nodes:
   validate_input:
     builder: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.build_validate_input

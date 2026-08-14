@@ -20,23 +20,37 @@ class LatestAiDevelopmentWorkflow:
         self.settings = get_settings()
         self.graph_config = get_graph_config()
         self.final_output_field = str(self.graph_config.get("final_output_field", "report") or "report")
+        self.save_output = bool(self.graph_config.get("execution", {}).get("save_output", False))
         configure_logging(getattr(self.settings, "log_level", "INFO"))
         self._graph = None
+        logger.info(
+            "Workflow initialized | entry_point=%s | final_output_field=%s | save_output=%s",
+            self.graph_config.get("entry_point"),
+            self.final_output_field,
+            self.save_output,
+        )
 
     def get_graph(self):
         if self._graph is None:
             logger.info("Building LangGraph workflow")
             self._graph = GraphBuilder.build()
+        else:
+            logger.debug("Using cached LangGraph workflow")
         return self._graph
 
     def build_initial_state(self, *, topic: str) -> State:
-        return {
+        initial_state: State = {
             "topic": topic,
             "agent_plan": [],
             "errors": [],
             "research_result": "",
             "report": "",
         }
+        logger.debug(
+            "Initial state prepared | state_keys=%s",
+            summarize_state_keys(initial_state),
+        )
+        return initial_state
 
     def kickoff(self, inputs: dict[str, Any], flow_run_id: str | None = None) -> State:
         topic = str(inputs.get("topic", "") or "")

@@ -12,8 +12,19 @@ from langchain_core.messages import HumanMessage
 
 from latest_ai_development.config.settings import get_settings
 from latest_ai_development.graph.state import State
-from latest_ai_development.llm.llm_factory import LLMFactory
+from latest_ai_development.llm.llm_factory import LLMFactory, get_fallback_llms
+from latest_ai_development.llm.model_attempt_logging import (
+    LoggedModelFallbackMiddleware,
+    ModelAttemptLoggingMiddleware,
+    get_model_attempts,
+)
+from latest_ai_development.llm.model_settings import (
+    get_fallback_model_settings,
+    get_model_settings,
+)
+from latest_ai_development.logging_utils import summarize_tools
 from latest_ai_development.prompts.prompt_builder import build_reporting_prompt
+from latest_ai_development.tools.tool_registry import get_tools_for_agent
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +59,29 @@ class ReportingNodeBuilder:
     def build() -> Callable[[State], dict[str, Any]]:
         logger.info("Building Reporting Node...")
         provider = get_settings().provider.lower()
-        
+
         logger.info("Creating LLM for Reporting Node with provider=%s...", provider)
         llm = LLMFactory().create_llm(provider=provider)
+        primary_settings = get_model_settings(provider)
+        fallback_settings = get_fallback_model_settings(provider)
+        primary_attempt, fallback_attempts = get_model_attempts(
+            "reporting",
+            primary_settings,
+            fallback_settings,
+        )
+        fallback_llms = get_fallback_llms(provider)
+        middleware = []
+        if fallback_llms:
+            middleware.append(
+                LoggedModelFallbackMiddleware(
+                    primary_attempt,
+                    fallback_attempts,
+                    fallback_llms[0],
+                    *fallback_llms[1:],
+                )
+            )
+        else:
+            middleware.append(ModelAttemptLoggingMiddleware(primary_attempt))
 
         logger.info("Building Reporting Prompt...")
         prompt = build_reporting_prompt()
@@ -58,21 +89,36 @@ class ReportingNodeBuilder:
         logger.info("Creating Reporting Agent...")
         agent = create_agent(
             model=llm,
-            tools=[],
+            tools=tools,
             system_prompt=prompt,
+            middleware=middleware,
         )
 
         def reporting_node(state: State, /) -> dict[str, Any]:
-            logger.info(f"Reporting Node received topic: {state.get('topic')}")
+            logger.info("Reporting Node started")
+            tools = get_tools_for_agent(state.get("agent_plan", []), agent_id="reporting")
+            logger.debug("Reporting Node tools=%s", summarize_tools(tools))
+            logger.debug(
+                "Reporting Node payload | topic_length=%s | research_result_present=%s",
+                len(str(state.get("topic", "")).strip()),
+                bool(str(state.get("research_result", "") or "").strip()),
+            )
             user_message = _build_reporting_message(state)
 
+            logger.info("Creating Reporting Agent...")
+            agent = create_agent(
+                model=llm,
+                tools=tools,
+                system_prompt=prompt,
+            )
             agent_input = {"messages": [HumanMessage(content=user_message)]}
+            logger.debug("Reporting Node invoking agent")
             result = agent.invoke(cast(Any, agent_input))
 
             report = result["messages"][-1].content
 
             logger.info("Reporting Node completed successfully")
-            logger.debug(f"Generated Report: {report}")
+            logger.debug("Reporting Node output length=%s", len(str(report)))
 
             return {
                 **state,
