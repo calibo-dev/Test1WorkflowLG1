@@ -29,6 +29,7 @@ class LLMFactory:
         - OpenAI
         - Anthropic
         - Gemini
+        - Bedrock
         - Ollama
         """
         settings = get_model_settings(provider_name=provider)
@@ -76,6 +77,22 @@ class LLMFactory:
                 temperature=model_settings.temperature,
                 api_key=model_settings.extra.get("api_key"),
                 max_tokens=model_settings.max_tokens,
+            )
+
+        if provider == "bedrockai":
+            try:
+                from langchain_aws import ChatBedrockConverse
+            except ImportError as exc:
+                raise ImportError(
+                    "Bedrock provider requires the 'langchain-aws' package. "
+                    "Run `uv sync` to install template dependencies."
+                ) from exc
+
+            return ChatBedrockConverse(
+                model=model_settings.model,
+                api_key=model_settings.extra.get("api_key"),
+                max_tokens=model_settings.max_tokens,
+                region_name=model_settings.extra.get("region_name"),
             )
 
         if provider == "ollama":

@@ -83,14 +83,16 @@ def test_models_config_is_loaded_from_yaml():
     assert "openai" in models_config["providers"]
     assert "anthropicai" in models_config["providers"]
     assert "geminiai" in models_config["providers"]
+    assert "bedrockai" in models_config["providers"]
     assert "ollama" in models_config["providers"]
 
 
-def test_normalize_provider_name_maps_anthropic_and_gemini_aliases():
+def test_normalize_provider_name_maps_provider_aliases():
     assert normalize_provider_name("anthropic") == "anthropicai"
     assert normalize_provider_name("ANTHROPIC") == "anthropicai"
     assert normalize_provider_name("gemini") == "geminiai"
     assert normalize_provider_name("GEMINI") == "geminiai"
+    assert normalize_provider_name("bedrock") == "bedrockai"
     assert normalize_provider_name("openai") == "openai"
 
 
@@ -145,3 +147,15 @@ def test_model_settings_supports_gemini_provider(monkeypatch):
     assert model_settings.provider == "geminiai"
     assert model_settings.model == "gemini-2.5-flash"
     assert model_settings.extra["api_key"] == "gemini-test-key"
+
+
+def test_model_settings_supports_bedrock_provider(monkeypatch):
+    monkeypatch.setenv("BEDROCK_AI_API_KEY", "bedrock-test-token")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+
+    model_settings = get_model_settings("bedrock")
+
+    assert model_settings.provider == "bedrockai"
+    assert model_settings.model == "us.anthropic.claude-opus-5"
+    assert model_settings.extra["api_key"] == "bedrock-test-token"
+    assert model_settings.extra["region_name"] == "us-east-1"
