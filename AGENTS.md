@@ -133,6 +133,9 @@ Typical current secret resolution:
 - Gemini:
   - direct value: `GEMINIAI_API_KEY`
   - secret reference: `GEMINIAI_API_KEY_SECRET`
+- Bedrock:
+  - direct value: `BEDROCK_AI_API_KEY`
+  - secret reference: `BEDROCK_AI_API_KEY_SECRET`
 
 ## Startup and Validation
 
