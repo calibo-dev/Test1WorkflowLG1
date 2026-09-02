@@ -11,6 +11,31 @@ from latest_ai_development.config.settings import (
 from latest_ai_development.llm.model_settings import get_model_settings
 
 
+def _validate_provider_model_section(
+    providers: dict[str, object],
+    *,
+    provider_name: str,
+    section_name: str,
+    section_cfg: object,
+) -> None:
+    if not isinstance(section_cfg, dict):
+        raise ValueError(
+            f"Provider '{provider_name}' {section_name} must be a mapping in models.yaml"
+        )
+
+    model_name = section_cfg.get("chat_model")
+    if not isinstance(model_name, str) or not model_name.strip():
+        raise ValueError(
+            f"Provider '{provider_name}' {section_name} must define chat_model in models.yaml"
+        )
+
+    fallback_provider = normalize_provider_name(section_cfg.get("provider") or provider_name)
+    if fallback_provider not in providers:
+        raise ValueError(
+            f"Provider '{provider_name}' {section_name} references unknown provider '{fallback_provider}'"
+        )
+
+
 def _resolve_reference(reference: str):
     module_path, separator, attribute_path = reference.partition(":")
     if not separator or not module_path or not attribute_path:
@@ -114,6 +139,21 @@ def validate_configuration() -> None:
         raise ValueError(
             f"default_provider '{default_provider}' is not defined in models.yaml providers"
         )
+
+    for provider_name, provider_cfg in providers.items():
+        if not isinstance(provider_cfg, dict) or not provider_cfg.get("chat_model"):
+            raise ValueError(
+                f"Provider '{provider_name}' must define 'chat_model' in models.yaml"
+            )
+
+        fallback_cfg = provider_cfg.get("fallback")
+        if fallback_cfg:
+            _validate_provider_model_section(
+                providers,
+                provider_name=provider_name,
+                section_name="fallback",
+                section_cfg=fallback_cfg,
+            )
 
     env_provider = normalize_provider_name(settings.provider)
     if env_provider not in providers:

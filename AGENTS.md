@@ -95,6 +95,13 @@ LLM setup follows this path:
 
 The node builders should not hardcode model defaults. Provider selection comes from `Settings`, and per-provider model metadata comes from `models.yaml`.
 
+## Model Fallback
+
+- `src/latest_ai_development/config/models.yaml` may define an optional `fallback` block under the active provider.
+- Active agent-backed nodes keep the primary model in `create_agent(...)` and wire fallback models through LangChain `ModelFallbackMiddleware`.
+- `src/latest_ai_development/llm/model_attempt_logging.py` adds attempt-level logging for the primary model and each fallback retry.
+- Fallback is a model-call concern only; it must not be implemented as graph topology, router branching, or extra workflow nodes.
+
 ## Secrets and Runtime Variables
 
 Deployment/runtime variables are resolved centrally in `config/settings.py` and then consumed by the app runtime.
@@ -150,10 +157,14 @@ App startup currently performs:
 5. LangSmith tracing initialization through `tracking.py` during FastAPI lifespan startup
 6. FastAPI app startup
 
-If tracing credentials are missing, startup fails fast rather than running in a partially configured state.
+LangSmith tracing is controlled by `LANGSMITH_TRACING`.
+
+- If `LANGSMITH_TRACING=true`, startup requires valid LangSmith credentials.
+- If `LANGSMITH_TRACING=false`, startup continues with tracing disabled.
 
 LangSmith inputs:
 
+- `LANGSMITH_TRACING`
 - `LANGSMITH_API_KEY`
 - `LANGSMITH_API_KEY_SECRET`
 - `LANGSMITH_PROJECT`
@@ -198,6 +209,23 @@ These files are workflow-critical and should stay aligned:
 - `src/latest_ai_development/nodes/research_node_builder.py`
 - `src/latest_ai_development/nodes/reporting_node_builder.py`
 
+## Output Persistence
+
+Report-file persistence is controlled by `execution.save_output` in `src/latest_ai_development/config/graph_config.yaml`.
+
+Current default:
+
+- `save_output: false`
+
+This default avoids write failures on deployments that run with `readOnlyRootFilesystem: true`.
+
+If you enable file output:
+
+- point `OUTPUT_DIR` to a writable path such as a mounted volume or `/tmp/output`
+- do not assume `/app/output` is writable in production
+
+If report writing fails at runtime, the workflow logs a warning and still returns the API response instead of failing the request.
+
 ## Extension Guidance
 
 When extending the template:
@@ -208,7 +236,7 @@ When extending the template:
 - keep node outputs aligned with shared state
 - only update `graph/graph_builder.py` if the generic config-driven compiler contract itself changes
 - update `main.py` request/response models if the external contract changes
-- keep report persistence inside `workflow.py`
+- keep any optional report persistence logic inside `workflow.py`
 
 ## Validation
 

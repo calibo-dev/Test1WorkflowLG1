@@ -11,6 +11,8 @@ from langchain_core.messages import HumanMessage
 from latest_ai_development.graph.state import State
 from latest_ai_development.llm.llm_factory import LLMFactory
 from latest_ai_development.prompts.prompt_builder import build_primary_researcher_prompt
+from latest_ai_development.logging_utils import summarize_tools
+from latest_ai_development.tools.tool_registry import get_tools_for_agent
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +30,17 @@ class PrimaryResearcherNodeBuilder:
         logger.info("Building Primary Researcher Prompt...")
         system_prompt = build_primary_researcher_prompt()
 
-        logger.info("Creating Primary Researcher Agent...")
-        agent = create_agent(
-            model=llm,
-            tools=[],
-            system_prompt=system_prompt,
-        )
-
         def primary_researcher_node(state: State, /) -> dict[str, Any]:
             logger.info(f"Primary Researcher Node received topic: {state['topic']}")
+            tools = get_tools_for_agent(state.get("agent_plan", []), agent_id="research")
+            logger.debug("Primary Researcher Node tools=%s", summarize_tools(tools))
 
+            logger.info("Creating Primary Researcher Agent...")
+            agent = create_agent(
+                model=llm,
+                tools=tools,
+                system_prompt=system_prompt,
+            )
             agent_input = {"messages": [HumanMessage(content=state["topic"]) ]}
             result = agent.invoke(cast(Any, agent_input))
 
