@@ -10,7 +10,10 @@ from latest_ai_development.config.settings import (
     normalize_provider_name,
 )
 from latest_ai_development.config.validators import validate_configuration
-from latest_ai_development.llm.model_settings import get_model_settings
+from latest_ai_development.llm.model_settings import (
+    get_fallback_model_settings,
+    get_model_settings,
+)
 
 
 def test_settings_default_runtime_values(monkeypatch):
@@ -79,12 +82,13 @@ def test_validate_configuration_requires_resolvable_provider_credentials(monkeyp
 def test_models_config_is_loaded_from_yaml():
     models_config = get_models_config()
 
-    assert models_config["default_provider"] == "ollama"
+    assert models_config["default_provider"] == "openai"
     assert "openai" in models_config["providers"]
     assert "anthropicai" in models_config["providers"]
     assert "geminiai" in models_config["providers"]
     assert "bedrockai" in models_config["providers"]
     assert "ollama" in models_config["providers"]
+    assert models_config["providers"]["openai"]["fallback"]["provider"] == "openai"
 
 
 def test_normalize_provider_name_maps_provider_aliases():
@@ -101,6 +105,7 @@ def test_graph_config_is_loaded_from_yaml():
 
     assert graph_config["entry_point"] == "validate_input"
     assert graph_config["final_output_field"] == "report"
+    assert graph_config["execution"]["save_output"] is False
     assert "router_agent" in graph_config["nodes"]
     assert graph_config["nodes"]["research"]["builder"].endswith(":ResearchNodeBuilder.build")
 
@@ -159,3 +164,14 @@ def test_model_settings_supports_bedrock_provider(monkeypatch):
     assert model_settings.model == "us.anthropic.claude-opus-5"
     assert model_settings.extra["api_key"] == "bedrock-test-token"
     assert model_settings.extra["region_name"] == "us-east-1"
+
+
+def test_fallback_model_settings_supports_cross_provider_fallback(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+
+    fallback_settings = get_fallback_model_settings("openai")
+
+    assert len(fallback_settings) == 1
+    assert fallback_settings[0].provider == "openai"
+    assert fallback_settings[0].model == "gpt-4.1-nano"
+    assert fallback_settings[0].extra["api_key"] == "openai-test-key"

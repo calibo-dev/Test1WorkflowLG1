@@ -1,6 +1,9 @@
 entry_point: validate_input
 final_output_field: report
 
+execution:
+  save_output: false
+
 nodes:
   validate_input:
     builder: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.build_validate_input
@@ -33,3 +36,83 @@ conditional_edges:
     path_map:
       reporting: reporting
       finalize_output: finalize_output
+
+tracing:
+  workflow:
+    enabled: true
+    name: Research Reporting Workflow
+    run_type: chain
+    tags:
+      - workflow
+      - langgraph
+    metadata:
+      workflow_name: research_reporting
+      workflow_version: "1.0"
+    input_fields:
+      flow_run_id: flow_run_id
+      topic: inputs.topic
+      input_keys:
+        path: inputs
+        transform: keys
+      initial_state_keys:
+        path: initial_state
+        transform: keys
+    output_fields:
+      topic: topic
+      keys:
+        path: .
+        transform: keys
+      has_report:
+        path: report
+        transform: bool
+      report_chars:
+        path: report
+        transform: len
+      research_result_chars:
+        path: research_result
+        transform: len
+  nodes:
+    research:
+      enabled: true
+      name: Research Node
+      run_type: chain
+      tags:
+        - node
+        - research
+      metadata:
+        component_type: node
+        node_id: research
+      input_fields:
+        topic: state.topic
+        input_keys:
+          path: state
+          transform: keys
+      output_fields:
+        output_keys:
+          path: .
+          transform: keys
+        research_result_chars:
+          path: research_result
+          transform: len
+    reporting:
+      enabled: true
+      name: Reporting Node
+      run_type: chain
+      tags:
+        - node
+        - reporting
+      metadata:
+        component_type: node
+        node_id: reporting
+      input_fields:
+        topic: state.topic
+        research_result_chars:
+          path: state.research_result
+          transform: len
+      output_fields:
+        output_keys:
+          path: .
+          transform: keys
+        report_chars:
+          path: report
+          transform: len

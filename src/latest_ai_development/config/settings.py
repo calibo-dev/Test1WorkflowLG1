@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     app_env: str = Field(default="dev", alias="APP_ENV")
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    langsmith_tracing: bool = Field(default=False, alias="LANGSMITH_TRACING")
 
     provider: str = Field(default="OLLAMA", alias="PROVIDER")
 
@@ -70,6 +71,7 @@ class Settings(BaseSettings):
     langsmith_api_key_secret: str = Field(default="", alias="LANGSMITH_API_KEY_SECRET")
     langsmith_endpoint: str = Field(default="", alias="LANGSMITH_ENDPOINT")
     langsmith_project: str = Field(default="", alias="LANGSMITH_PROJECT")
+    tracing_backend: str = Field(default="NONE", alias="TRACING_BACKEND")
 
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
 
@@ -93,6 +95,21 @@ class Settings(BaseSettings):
             if normalized in {"1", "true", "yes", "on", "debug"}:
                 return True
             if normalized in {"0", "false", "no", "off", "release", "prod", "production", ""}:
+                return False
+
+        return bool(value)
+
+    @field_validator("langsmith_tracing", mode="before")
+    @classmethod
+    def parse_langsmith_tracing_value(cls, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off", ""}:
                 return False
 
         return bool(value)
