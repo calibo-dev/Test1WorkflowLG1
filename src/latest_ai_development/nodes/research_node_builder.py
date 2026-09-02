@@ -106,6 +106,7 @@ class ResearchNodeBuilder:
                 model=llm,
                 tools=tools,
                 system_prompt=system_prompt,
+                middleware=middleware,
             )
             agent_input = {"messages": [HumanMessage(content=_build_research_message(state))]}
             logger.debug("Research Node invoking agent")

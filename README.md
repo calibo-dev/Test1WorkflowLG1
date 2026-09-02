@@ -99,7 +99,7 @@ Important environment variables are resolved through `Settings` in `config/setti
 Common values:
 
 - `PROVIDER`
-  Supported by the current template: `OPENAI`, `ANTHROPIC`, `GEMINI`, `OLLAMA`
+  Supported by the current template: `OPENAI`, `ANTHROPIC`, `GEMINI`,`BEDROCK`, `OLLAMA`
 - `API_HOST`
 - `PORT`
 - `API_ROOT_PATH`
@@ -196,6 +196,9 @@ Typical API key configuration:
 - Gemini:
   - direct value: `GEMINIAI_API_KEY`
   - secret reference: `GEMINIAI_API_KEY_SECRET`
+- Bedrock:
+  - direct value: `BEDROCK_AI_API_KEY`
+  - secret reference: `BEDROCK_AI_API_KEY_SECRET`
 
 ## Observability and Tracing
 

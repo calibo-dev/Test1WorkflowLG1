@@ -74,13 +74,21 @@ class LatestAiDevelopmentWorkflow:
         )
 
         report = result.get(self.final_output_field, "")
-        if isinstance(report, str) and report.strip():
-            self.settings.report_output_path.write_text(report, encoding="utf-8")
-            logger.info(
-                "Report saved | flow_run_id=%s | output_path=%s",
-                flow_run_id,
-                self.settings.report_output_path,
-            )
+        if self.save_output and isinstance(report, str) and report.strip():
+            try:
+                self.settings.report_output_path.write_text(report, encoding="utf-8")
+                logger.info(
+                    "Report saved | flow_run_id=%s | output_path=%s",
+                    flow_run_id,
+                    self.settings.report_output_path,
+                )
+            except OSError as exc:
+                logger.warning(
+                    "Report save failed | flow_run_id=%s | output_path=%s | error=%s",
+                    flow_run_id,
+                    self.settings.report_output_path,
+                    exc,
+                )
 
         logger.info("Workflow completed | flow_run_id=%s", flow_run_id)
 

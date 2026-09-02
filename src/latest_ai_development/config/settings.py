@@ -16,6 +16,7 @@ DEFAULT_OUTPUT_DIR = BASE_DIR / "output"
 
 PROVIDER_ALIASES = {
     "anthropic": "anthropicai",
+    "bedrock": "bedrockai",
     "gemini": "geminiai",
 }
 
@@ -59,6 +60,8 @@ class Settings(BaseSettings):
     anthropicai_api_key_secret: str = Field(default="", alias="ANTHROPICAI_API_KEY_SECRET")
     geminiai_api_key: str = Field(default="", alias="GEMINIAI_API_KEY")
     geminiai_api_key_secret: str = Field(default="", alias="GEMINIAI_API_KEY_SECRET")
+    bedrock_ai_api_key: str = Field(default="", alias="BEDROCK_AI_API_KEY")
+    bedrock_ai_api_key_secret: str = Field(default="", alias="BEDROCK_AI_API_KEY_SECRET")
 
     cloud_provider: str = Field(default="", alias="CLOUD_PROVIDER")
     azure_key_vault_url: str = Field(default="", alias="AZURE_KEY_VAULT_URL")

@@ -124,6 +124,15 @@ def get_model_settings(provider_name: str | None = None, *, section: str = "prim
         )
         extra["api_key"] = api_key
 
+    elif resolved_provider == "bedrockai":
+        api_key = _resolve_required_api_key(
+            direct_value=settings.bedrock_ai_api_key,
+            secret_name=settings.bedrock_ai_api_key_secret,
+            secrets_manager=secrets_manager,
+        )
+        extra["api_key"] = api_key
+        extra["region_name"] = settings.aws_region
+
     elif resolved_provider == "ollama":
         extra["base_url"] = settings.ollama_base_url
 
