@@ -1,271 +1,148 @@
 from __future__ import annotations
 
-import json
-import logging
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, Literal
 
-from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
+from langgraph.types import interrupt
 
-from latest_ai_development.config.settings import get_settings
 from latest_ai_development.graph.state import State
-from latest_ai_development.llm.llm_factory import LLMFactory, get_fallback_llms
-from latest_ai_development.llm.model_attempt_logging import (
-    LoggedModelFallbackMiddleware,
-    ModelAttemptLoggingMiddleware,
-    get_model_attempts,
-)
-from latest_ai_development.llm.model_settings import (
-    get_fallback_model_settings,
-    get_model_settings,
-)
-from latest_ai_development.logging_utils import summarize_tools
-from latest_ai_development.prompts.prompt_builder import build_router_prompt
 
 
-logger = logging.getLogger(__name__)
+RouteName = Literal["appreciation", "clarification", "service_recovery", "human_review"]
 
 
-class OrchestrationNodeBuilder:
-    @staticmethod
-    def _default_agent_plan() -> list[dict[str, Any]]:
-        return [
-            {
-                "id": "research",
-                "name": "Research agent",
-                "enabled": True,
-                "role": "Research agent",
-                "tools": [],
-            },
-            {
-                "id": "reporting",
-                "name": "Reporting agent",
-                "enabled": True,
-                "role": "Reporting agent",
-                "tools": [],
-            },
-        ]
+def _parse_confidence(raw_confidence: Any) -> float:
+    try:
+        confidence = float(raw_confidence)
+    except (TypeError, ValueError):
+        return 0.0
+    if confidence > 1:
+        confidence /= 100
+    return max(0.0, min(confidence, 1.0))
 
-    @staticmethod
-    def _normalize_agent_plan(raw_agent_plan: Any) -> list[dict[str, Any]]:
-        if not isinstance(raw_agent_plan, list):
-            return OrchestrationNodeBuilder._default_agent_plan()
 
-        normalized_agent_plan: list[dict[str, Any]] = []
-        for raw_agent in raw_agent_plan:
-            if not isinstance(raw_agent, dict):
-                continue
+def _keyword_score(text: str, weighted_terms: Mapping[str, int]) -> int:
+    normalized = text.lower()
+    return sum(weight for term, weight in weighted_terms.items() if term in normalized)
 
-            agent_id = raw_agent.get("id")
-            if agent_id not in {"research", "reporting"}:
-                continue
 
-            normalized_agent_plan.append(
-                {
-                    "id": agent_id,
-                    "name": str(raw_agent.get("name", "") or ""),
-                    "enabled": bool(raw_agent.get("enabled", True)),
-                    "role": str(raw_agent.get("role", "") or ""),
-                    "tools": [
-                        str(tool_name).strip()
-                        for tool_name in (raw_agent.get("tools", []) or [])
-                        if isinstance(tool_name, str) and tool_name.strip()
-                    ],
-                }
-            )
+def route_after_evaluation(state: State) -> RouteName:
+    """Route using classifier confidence plus deterministic risk scores."""
+    confidence = _parse_confidence(state.get("confidence"))
+    sentiment = str(state.get("sentiment", "unknown")).strip().lower()
+    urgency_score = int(state.get("urgency_score", 0))
+    policy_risk_score = int(state.get("policy_risk_score", 0))
 
-        if not normalized_agent_plan:
-            return OrchestrationNodeBuilder._default_agent_plan()
+    if policy_risk_score >= 70 or urgency_score >= 80:
+        return "human_review"
+    if confidence < 0.6 or sentiment not in {"positive", "negative"}:
+        return "clarification"
+    if sentiment == "negative" or urgency_score >= 35:
+        return "service_recovery"
+    return "appreciation"
 
-        return normalized_agent_plan
+
+class FeedbackOrchestrationNodeBuilder:
+    """Build deterministic preparation, scoring, HITL, and finalization nodes."""
+
+    URGENCY_TERMS = {
+        "urgent": 35,
+        "immediately": 30,
+        "refund": 25,
+        "cancel": 20,
+        "broken": 20,
+        "never arrived": 35,
+    }
+    POLICY_RISK_TERMS = {
+        "unsafe": 70,
+        "injury": 80,
+        "legal": 70,
+        "fraud": 75,
+        "chargeback": 50,
+        "privacy": 60,
+    }
 
     @staticmethod
-    def _parse_router_result(raw_result: Any) -> list[dict[str, Any]]:
-        if isinstance(raw_result, dict) and "messages" in raw_result:
-            content = raw_result["messages"][-1].content
-        else:
-            content = getattr(raw_result, "content", str(raw_result))
-
-        if not isinstance(content, str):
-            return OrchestrationNodeBuilder._default_agent_plan()
-
-        normalized_content = content.strip()
-        if normalized_content.startswith("```"):
-            normalized_content = normalized_content.strip("`")
-            if normalized_content.startswith("json"):
-                normalized_content = normalized_content[4:].strip()
-
-        try:
-            parsed = json.loads(normalized_content)
-        except json.JSONDecodeError:
-            return OrchestrationNodeBuilder._default_agent_plan()
-
-        return OrchestrationNodeBuilder._normalize_agent_plan(parsed.get("agent_plan"))
-
-    @staticmethod
-    def route_after_router_agent(state: State) -> str:
-        if state.get("errors"):
-            logger.info("Router routing to finalize_output because errors are present")
-            return "finalize_output"
-
-        enabled_agents = {
-            agent.get("id")
-            for agent in state.get("agent_plan", [])
-            if agent.get("enabled", True)
-        }
-        logger.debug("Router enabled agents=%s", sorted(enabled_agents))
-
-        if "research" in enabled_agents:
-            logger.info("Router selected research")
-            return "research"
-
-        if "reporting" in enabled_agents:
-            logger.info("Router selected reporting")
-            return "reporting"
-
-        logger.info("Router selected finalize_output because no enabled agents remain")
-        return "finalize_output"
-
-    @staticmethod
-    def route_after_research(state: State) -> str:
-        if state.get("errors"):
-            logger.info("Research router routing to finalize_output because errors are present")
-            return "finalize_output"
-
-        enabled_agents = {
-            agent.get("id")
-            for agent in state.get("agent_plan", [])
-            if agent.get("enabled", True)
-        }
-        logger.debug("Research router enabled agents=%s", sorted(enabled_agents))
-
-        if "reporting" in enabled_agents:
-            logger.info("Research router selected reporting")
-            return "reporting"
-
-        logger.info("Research router selected finalize_output because reporting is disabled")
-        return "finalize_output"
-
-    @staticmethod
-    def build_validate_input() -> Callable[[State], dict[str, Any]]:
-
-        def validate_input_node(state: State, /) -> dict[str, Any]:
-            logger.info("Validate Input node started")
-
-            topic = state.get("topic", "")
-            errors = list(state.get("errors", []))
-            logger.debug(
-                "Validate Input payload | topic_length=%s | existing_error_count=%s",
-                len(topic.strip()) if isinstance(topic, str) else 0,
-                len(errors),
-            )
-
-            if not isinstance(topic, str) or not topic.strip():
-                errors.append("topic is required")
-
-            logger.info("Validate Input node completed with %s error(s)", len(errors))
-
-            return {
-                **state,
-                "errors": errors,
-            }
-
-        return validate_input_node
-
-    @staticmethod
-    def build_router_agent() -> Callable[[State], dict[str, Any]]:
-        logger.info("Building Router Agent Node...")
-        provider = get_settings().provider.lower()
-        tools: list[Any] = []
-        logger.debug("Router Agent tools=%s", summarize_tools(tools))
-
-        logger.info("Creating LLM for Router Agent with provider=%s...", provider)
-        llm = LLMFactory().create_llm(provider=provider)
-        primary_settings = get_model_settings(provider)
-        fallback_settings = get_fallback_model_settings(provider)
-        primary_attempt, fallback_attempts = get_model_attempts(
-            "router_agent",
-            primary_settings,
-            fallback_settings,
-        )
-        fallback_llms = get_fallback_llms(provider)
-        middleware = []
-        if fallback_llms:
-            middleware.append(
-                LoggedModelFallbackMiddleware(
-                    primary_attempt,
-                    fallback_attempts,
-                    fallback_llms[0],
-                    *fallback_llms[1:],
-                )
-            )
-        else:
-            middleware.append(ModelAttemptLoggingMiddleware(primary_attempt))
-
-        logger.info("Building Router Prompt...")
-        system_prompt = build_router_prompt()
-
-        logger.info("Creating Router Agent...")
-        agent = create_agent(
-            model=llm,
-            tools=tools,
-            system_prompt=system_prompt,
-            middleware=middleware,
-        )
-
-        def router_agent_node(state: State, /) -> dict[str, Any]:
-            logger.info("Router Agent node started")
-
-            agent_plan = list(state.get("agent_plan", []))
-            if agent_plan:
-                logger.info("Router Agent node reused existing agent plan with %s agent(s)", len(agent_plan))
+    def build_prepare_feedback() -> Callable[[State], dict[str, Any]]:
+        def prepare_feedback_node(state: State, /) -> dict[str, Any]:
+            user_input = state.get("user_input", "")
+            if not isinstance(user_input, str) or not user_input.strip():
                 return {
-                    **state,
-                    "agent_plan": OrchestrationNodeBuilder._normalize_agent_plan(agent_plan),
+                    "errors": ["user_input is required"],
+                    "validation_status": "invalid",
                 }
-
-            agent_input = {"messages": [HumanMessage(content=f"Topic:\n{state['topic']}")]}
-            logger.debug(
-                "Router Agent invoking model | topic_length=%s",
-                len(str(state.get("topic", "")).strip()),
-            )
-            result = agent.invoke(agent_input)
-            parsed_agent_plan = OrchestrationNodeBuilder._parse_router_result(result)
-
-            logger.info("Router Agent node completed with %s agent(s)", len(parsed_agent_plan))
-            logger.debug("Router Agent parsed plan=%s", parsed_agent_plan)
-
+            normalized = " ".join(user_input.split())
+            if len(normalized) < 4:
+                return {
+                    "errors": ["Please provide more detail about your experience."],
+                    "normalized_feedback": normalized,
+                    "validation_status": "invalid",
+                }
             return {
-                **state,
-                "agent_plan": parsed_agent_plan,
+                "normalized_feedback": normalized,
+                "validation_status": "valid",
             }
 
-        return router_agent_node
+        return prepare_feedback_node
+
+    @staticmethod
+    def build_evaluate_feedback() -> Callable[[State], dict[str, Any]]:
+        def evaluate_feedback_node(state: State, /) -> dict[str, Any]:
+            feedback = str(state.get("normalized_feedback", ""))
+            sentiment = str(state.get("sentiment", "unknown")).lower()
+            confidence = _parse_confidence(state.get("confidence"))
+
+            urgency_score = _keyword_score(
+                feedback,
+                FeedbackOrchestrationNodeBuilder.URGENCY_TERMS,
+            )
+            policy_risk_score = _keyword_score(
+                feedback,
+                FeedbackOrchestrationNodeBuilder.POLICY_RISK_TERMS,
+            )
+            if sentiment == "negative":
+                urgency_score += 15
+            if confidence < 0.6:
+                policy_risk_score += 20
+
+            return {
+                "urgency_score": min(urgency_score, 100),
+                "policy_risk_score": min(policy_risk_score, 100),
+            }
+
+        return evaluate_feedback_node
+
+    @staticmethod
+    def build_human_review() -> Callable[[State], dict[str, Any]]:
+        def human_review_node(state: State, /) -> dict[str, Any]:
+            review = interrupt(
+                {
+                    "question": "Review this high-risk customer feedback and provide a response.",
+                    "feedback": state.get("normalized_feedback", ""),
+                    "sentiment": state.get("sentiment", "unknown"),
+                    "urgency_score": state.get("urgency_score", 0),
+                    "policy_risk_score": state.get("policy_risk_score", 0),
+                }
+            )
+            if isinstance(review, Mapping):
+                decision = str(review.get("decision", "reviewed"))
+                response = str(review.get("response", ""))
+            else:
+                decision = "reviewed"
+                response = str(review)
+            return {"human_decision": decision, "final_response": response}
+
+        return human_review_node
 
     @staticmethod
     def build_finalize_output() -> Callable[[State], dict[str, Any]]:
-
         def finalize_output_node(state: State, /) -> dict[str, Any]:
-            logger.info("Finalize Output node started")
-
             errors = list(state.get("errors", []))
-            report = state.get("report", "")
-            logger.debug(
-                "Finalize Output payload | error_count=%s | report_present=%s",
-                len(errors),
-                bool(str(report or "").strip()),
-            )
-
-            if errors and not report:
-                report = f"Error: {'; '.join(errors)}"
-                logger.info("Finalize Output synthesized report from errors")
-
-            logger.info("Finalize Output node completed")
-
-            return {
-                **state,
-                "report": report,
-            }
+            final_response = str(state.get("final_response", "")).strip()
+            if errors and not final_response:
+                final_response = f"Error: {'; '.join(errors)}"
+            if not final_response:
+                final_response = "We could not prepare a response. Please contact customer service."
+            return {"final_response": final_response}
 
         return finalize_output_node

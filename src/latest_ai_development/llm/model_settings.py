@@ -21,7 +21,9 @@ class ModelSettings:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-def _resolve_api_key(*, direct_value: str, secret_name: str, secrets_manager: SecretsManager) -> str | None:
+def _resolve_api_key(
+    *, direct_value: str, secret_name: str, secrets_manager: SecretsManager
+) -> str | None:
     direct_value = direct_value.strip()
     if direct_value:
         return direct_value
@@ -77,12 +79,17 @@ def _get_provider_section_config(
     return fallback_provider, merged_cfg
 
 
-def get_model_settings(provider_name: str | None = None, *, section: str = "primary") -> ModelSettings:
+def get_model_settings(
+    provider_name: str,
+    *,
+    section: str = "primary",
+    model_name: str | None = None,
+) -> ModelSettings:
     settings = get_settings()
     models_cfg = get_models_config()
     secrets_manager = SecretsManager()
 
-    provider = normalize_provider_name(provider_name or settings.provider)
+    provider = normalize_provider_name(provider_name)
     providers = models_cfg.get("providers", {})
     resolved_provider, provider_cfg = _get_provider_section_config(
         providers,
@@ -90,13 +97,12 @@ def get_model_settings(provider_name: str | None = None, *, section: str = "prim
         section=section,
     )
 
-    model_name = str(
-        provider_cfg.get("chat_model")
-        or models_cfg.get("default_model")
-        or ""
+    resolved_model_name = str(
+        model_name if section == "primary" else provider_cfg.get("chat_model", "")
     ).strip()
-    if not model_name:
-        raise ValueError(f"Provider '{resolved_provider}' must define chat_model in models.yaml")
+    if not resolved_model_name:
+        source = "agents.yaml" if section == "primary" else "models.yaml fallback"
+        raise ValueError(f"Model name for provider '{resolved_provider}' is missing from {source}")
 
     extra: dict[str, Any] = {}
 
@@ -138,12 +144,13 @@ def get_model_settings(provider_name: str | None = None, *, section: str = "prim
 
     else:
         raise ValueError(
-            f"Unsupported provider '{resolved_provider}'. Supported providers: {sorted(providers.keys())}"
+            f"Unsupported provider '{resolved_provider}'. Supported providers: "
+            f"{sorted(providers.keys())}"
         )
 
     return ModelSettings(
         provider=resolved_provider,
-        model=model_name,
+        model=resolved_model_name,
         temperature=float(provider_cfg.get("temperature", 0.3)),
         top_p=float(provider_cfg.get("top_p", 1.0)),
         max_tokens=int(provider_cfg.get("max_tokens", 2000)),
@@ -151,10 +158,9 @@ def get_model_settings(provider_name: str | None = None, *, section: str = "prim
     )
 
 
-def get_fallback_model_settings(provider_name: str | None = None) -> list[ModelSettings]:
-    settings = get_settings()
+def get_fallback_model_settings(provider_name: str) -> list[ModelSettings]:
     models_cfg = get_models_config()
-    provider = normalize_provider_name(provider_name or settings.provider)
+    provider = normalize_provider_name(provider_name)
     providers = models_cfg.get("providers", {})
     provider_cfg = providers.get(provider)
 

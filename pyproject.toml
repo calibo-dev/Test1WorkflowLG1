@@ -1,7 +1,7 @@
 [project]
 name = "latest-ai-development"
 version = "0.1.0"
-description = "LangGraph workflow template for automated research and report generation"
+description = "Configuration-driven LangGraph workflow template"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 
@@ -43,7 +43,8 @@ dev = [
   "pytest>=8.3.4",
   "pytest-cov>=6.0.0",
   "ruff>=0.9.7",
-  "mypy>=1.15.0"
+  "mypy>=1.15.0",
+  "types-PyYAML>=6.0.12"
 ]
 
 [project.scripts]

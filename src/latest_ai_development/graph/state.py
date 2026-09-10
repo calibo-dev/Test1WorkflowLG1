@@ -1,35 +1,34 @@
-from typing import TypedDict
+from __future__ import annotations
 
-class AgentConfig(TypedDict, total=False):
-    """
-    Internal agent configuration carried in workflow state.
-    """
-
-    id: str
-    name: str
-    enabled: bool
-    role: str
-    tools: list[str]
+from operator import add
+from typing import Annotated, TypedDict
 
 
-class State(TypedDict):
-    """
-    Shared LangGraph state passed between workflow nodes.
+class InputState(TypedDict):
+    """Public input accepted by the workflow."""
 
-    topic:
-        Original user input for the workflow.
-    agent_plan:
-        Internal agent definitions used by the POC workflow.
-    errors:
-        Validation or orchestration errors collected during execution.
-    research_result:
-        Intermediate output from the research node.
-    report:
-        Final output produced by the reporting node.
-    """
+    user_input: str
 
-    topic: str
-    agent_plan: list[AgentConfig]
+
+class OutputState(TypedDict, total=False):
+    """Public output returned by the workflow."""
+
+    final_response: str
     errors: list[str]
-    research_result: str
-    report: str
+
+
+class State(InputState, total=False):
+    """Internal workflow state; nodes return partial updates to these fields."""
+
+    errors: Annotated[list[str], add]
+    validation_status: str
+    normalized_feedback: str
+    sentiment: str
+    confidence: str
+    sentiment_reason: str
+    urgency_score: int
+    policy_risk_score: int
+    draft_response: str
+    policy_guidance: str
+    human_decision: str
+    final_response: str

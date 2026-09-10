@@ -5,8 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[3]
@@ -19,6 +18,7 @@ PROVIDER_ALIASES = {
     "bedrock": "bedrockai",
     "gemini": "geminiai",
 }
+
 
 def normalize_api_context(raw_context: str | None) -> str:
     """Return a stable URL prefix like '/testing' or ''."""
@@ -51,8 +51,6 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     langsmith_tracing: bool = Field(default=False, alias="LANGSMITH_TRACING")
-
-    provider: str = Field(default="OLLAMA", alias="PROVIDER")
 
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_api_key_secret: str = Field(default="", alias="OPENAI_API_KEY_SECRET")
@@ -134,6 +132,18 @@ class Settings(BaseSettings):
     def graph_config_path(self) -> Path:
         return CONFIG_DIR / "graph_config.yaml"
 
+    @property
+    def agents_config_path(self) -> Path:
+        return CONFIG_DIR / "agents.yaml"
+
+    @property
+    def tools_config_path(self) -> Path:
+        return CONFIG_DIR / "tools.yaml"
+
+    @property
+    def mcp_config_path(self) -> Path:
+        return CONFIG_DIR / "mcp.yaml"
+
 
 def ensure_runtime_dirs(settings: Settings) -> None:
     settings.output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -167,3 +177,18 @@ def get_models_config() -> dict[str, Any]:
 @lru_cache
 def get_graph_config() -> dict[str, Any]:
     return load_yaml_file(get_settings().graph_config_path)
+
+
+@lru_cache
+def get_agents_config() -> dict[str, Any]:
+    return load_yaml_file(get_settings().agents_config_path)
+
+
+@lru_cache
+def get_tools_config() -> dict[str, Any]:
+    return load_yaml_file(get_settings().tools_config_path)
+
+
+@lru_cache
+def get_mcp_config() -> dict[str, Any]:
+    return load_yaml_file(get_settings().mcp_config_path)

@@ -1,9 +1,24 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from importlib import import_module
+from inspect import isawaitable
 from typing import Any
 
+from latest_ai_development.config.settings import (
+    get_agents_config,
+    get_graph_config,
+    get_tools_config,
+)
+
 REGISTERED_TOOLS: dict[str, Any] = {}
+
+
+def register_tool(name: str, tool: Any) -> None:
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("Tool name must not be empty")
+    REGISTERED_TOOLS[normalized_name] = tool
 
 
 def get_tools_by_names(tool_names: Sequence[str] | None) -> list[Any]:
@@ -13,37 +28,70 @@ def get_tools_by_names(tool_names: Sequence[str] | None) -> list[Any]:
         if not isinstance(tool_name, str):
             continue
 
-        tool = REGISTERED_TOOLS.get(tool_name.strip())
+        normalized_name = tool_name.strip()
+        tool = REGISTERED_TOOLS.get(normalized_name)
+        if tool is None:
+            tool = _load_configured_tool(normalized_name)
         if tool is not None:
             resolved_tools.append(tool)
 
     return resolved_tools
 
 
-def get_tools_for_agent(
-    agent_plan: Sequence[Mapping[str, Any]] | None,
-    *,
-    agent_id: str | None = None,
-    agent_name: str | None = None,
-) -> list[Any]:
-    if not agent_plan:
+def _load_configured_tool(tool_name: str) -> Any:
+    tool_definitions = get_tools_config().get("tools", {})
+    tool_config = tool_definitions.get(tool_name) if isinstance(tool_definitions, Mapping) else None
+    if not isinstance(tool_config, Mapping):
+        return None
+
+    factory_reference = tool_config.get("factory")
+    if not isinstance(factory_reference, str):
+        return None
+    module_name, separator, attribute_name = factory_reference.partition(":")
+    if not separator:
+        raise ValueError(
+            f"Tool factory '{factory_reference}' must use '<module>:<attribute>' format"
+        )
+    factory: Any = import_module(module_name)
+    for part in attribute_name.split("."):
+        factory = getattr(factory, part)
+    if not callable(factory):
+        raise TypeError(f"Configured tool factory '{factory_reference}' is not callable")
+    factory_kwargs = tool_config.get("factory_kwargs", {})
+    if not isinstance(factory_kwargs, Mapping):
+        raise ValueError(f"Tool '{tool_name}' factory_kwargs must be a mapping")
+    tool = factory(**dict(factory_kwargs))
+    register_tool(tool_name, tool)
+    return tool
+
+
+def get_tools_for_node(node_id: str) -> list[Any]:
+    """Resolve tools declared for an agent-backed graph node."""
+    nodes = get_graph_config().get("nodes", {})
+    node_config = nodes.get(node_id) if isinstance(nodes, Mapping) else None
+    if not isinstance(node_config, Mapping):
         return []
 
-    for raw_agent in agent_plan:
-        if not isinstance(raw_agent, Mapping):
+    agent_id = node_config.get("agent")
+    agents = get_agents_config().get("agents", {})
+    agent_config = agents.get(agent_id) if isinstance(agents, Mapping) else None
+    if not isinstance(agent_config, Mapping):
+        return []
+
+    tool_names = agent_config.get("tools", [])
+    if not isinstance(tool_names, Sequence) or isinstance(tool_names, (str, bytes)):
+        return []
+    return get_tools_by_names([str(name) for name in tool_names])
+
+
+async def close_registered_tools() -> None:
+    """Close tool-owned resources once when the application shuts down."""
+    tools = list({id(tool): tool for tool in REGISTERED_TOOLS.values()}.values())
+    REGISTERED_TOOLS.clear()
+    for tool in tools:
+        close = getattr(tool, "aclose", None) or getattr(tool, "close", None)
+        if not callable(close):
             continue
-
-        matches_id = bool(agent_id) and raw_agent.get("id") == agent_id
-        matches_name = bool(agent_name) and raw_agent.get("name") == agent_name
-        if not matches_id and not matches_name:
-            continue
-
-        tool_names = raw_agent.get("tools")
-        if not isinstance(tool_names, Sequence) or isinstance(tool_names, (str, bytes)):
-            return []
-
-        return get_tools_by_names(
-            [str(tool_name).strip() for tool_name in tool_names if str(tool_name).strip()]
-        )
-
-    return []
+        result = close()
+        if isawaitable(result):
+            await result

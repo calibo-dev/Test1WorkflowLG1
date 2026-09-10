@@ -1,318 +1,273 @@
 # LangGraph Python Template
 
-This repository is the LangGraph workflow template for `latest-ai-development`.
-It exposes a FastAPI app, centralizes runtime configuration, and executes a small graph-based research and reporting workflow.
+Configuration-driven LangGraph template with a FastAPI endpoint, reusable agent
+runtime, deterministic nodes, conditional routing, model fallback, tool loading,
+and optional LangSmith tracing.
 
 ## Runtime Contract
 
-The template now uses a centralized configuration layer:
+The template separates workflow configuration from stable runtime code:
 
-- `src/latest_ai_development/config/settings.py`
-  Reads environment variables with `BaseSettings`, normalizes provider and API root-path values, and manages output paths.
-- `src/latest_ai_development/config/models.yaml`
-  Declares provider-specific model defaults plus optional fallback model configuration.
-- `src/latest_ai_development/config/graph_config.yaml`
-  Declares graph topology, entry point, edges, conditional routes, tracing overrides, and the final output field.
-- `src/latest_ai_development/config/validators.py`
-  Validates provider and cloud-secret configuration during startup.
-- `src/latest_ai_development/workflow.py`
-  Owns graph creation, initial state construction, workflow kickoff, and final report persistence.
-- `src/latest_ai_development/logging_utils.py`
-  Applies shared startup logging configuration without clobbering existing handlers.
+- `config/agents.yaml` defines agent roles, prompts, concrete providers and model
+  names, state access, outputs, and tool/MCP assignments.
+- `config/tools.yaml` defines ordinary Python tool factories.
+- `config/mcp.yaml` defines MCP server transports and connection metadata.
+- `config/graph_config.yaml` defines nodes, entry/end nodes, direct edges,
+  conditional routes, tracing, and the final output field.
+- `graph/state.py` defines the stable state envelope and sample-specific fields.
+- `nodes/agent_node_builder.py` builds every configured agent through one runtime
+  path.
+- `nodes/orchestration_node_builder.py` contains sample-specific deterministic
+  nodes.
+- `graph/graph_builder.py` compiles the configuration into a `StateGraph`.
+- `tools/tool_registry.py` resolves tools assigned to configured graph nodes.
+- `tests/test_template.py` verifies the reusable contract without naming sample
+  agents or requiring generated test rewrites.
 
-## Current Workflow
+See `approach.md` for the refactor rationale, ownership rules, and generated-file
+targets.
 
-The current template compiles a LangGraph workflow from `src/latest_ai_development/config/graph_config.yaml`, while node behavior remains in Python node-builder files.
-
-Current graph-config flow:
-
-```text
-validate_input
-  -> router_agent
-  -> research | reporting | finalize_output
-research
-  -> reporting | finalize_output
-reporting
-  -> finalize_output
-finalize_output
-  -> END
-```
-
-Current shared state lives in `src/latest_ai_development/graph/state.py` and contains:
-
-- `topic`
-- `agent_plan`
-- `errors`
-- `research_result`
-- `report`
-
-The external request contract is intentionally small:
-
-```json
-{
-  "topic": "Explain LangGraph workflow support"
-}
-```
-
-The response contract is:
-
-```json
-{
-  "topic": "Explain LangGraph workflow support",
-  "report": "..."
-}
-```
-
-## Project Structure
+## Sample Workflow
 
 ```text
-src/latest_ai_development/
-├── config/
-│   ├── __init__.py
-│   ├── graph_config.yaml
-│   ├── models.yaml
-│   ├── settings.py
-│   └── validators.py
-├── graph/
-│   ├── graph_builder.py
-│   └── state.py
-├── logging_utils.py
-├── llm/
-│   ├── llm_factory.py
-│   └── model_settings.py
-├── nodes/
-│   ├── orchestration_node_builder.py
-│   ├── reporting_node_builder.py
-│   └── research_node_builder.py
-├── prompts/
-│   └── prompt_builder.py
-├── main.py
-├── secrets_manager.py
-├── tracking.py
-└── workflow.py
+START
+  -> prepare_feedback
+       invalid -> finalize_output -> END
+       valid   -> classify_sentiment -> evaluate_feedback
+                    appreciation    -> appreciation_response -> finalize_output
+                    clarification   -> clarification_response -> finalize_output
+                    service_recovery -> service_recovery_response
+                                        -> policy_guidance -> finalize_output
+                    human_review    -> interrupt/resume -> finalize_output
 ```
 
-## Configuration
+The sample shows both routing styles. `prepare_feedback` uses a simple configured
+`decision_field`. `evaluate_feedback` computes weighted urgency and policy-risk
+scores, then a named Python router combines those scores with sentiment and model
+confidence to select one of four paths. High-risk feedback pauses at
+`human_review`; negative feedback runs a two-agent recovery and policy branch.
 
-Important environment variables are resolved through `Settings` in `config/settings.py`.
-
-Common values:
-
-- `PROVIDER`
-  Supported by the current template: `OPENAI`, `ANTHROPIC`, `GEMINI`,`BEDROCK`, `OLLAMA`
-- `API_HOST`
-- `PORT`
-- `API_ROOT_PATH`
-- `OUTPUT_DIR`
-- `REPORT_OUTPUT_FILE`
-- `TRACING_BACKEND`
-- `LANGSMITH_API_KEY` or `LANGSMITH_API_KEY_SECRET`
-- `LANGSMITH_PROJECT`
-- `CLOUD_PROVIDER`
-- `AWS_REGION`
-- `AZURE_KEY_VAULT_URL`
-
-Model defaults come from `src/latest_ai_development/config/models.yaml`, not from hardcoded values in the graph or node files.
-Graph topology comes from `src/latest_ai_development/config/graph_config.yaml`, not from hardcoded edges inside `graph_builder.py`.
-
-## Model Fallback
-
-The active LangGraph agent nodes follow the LangChain middleware fallback pattern.
-
-- The primary model is still passed directly into `create_agent(...)`.
-- Optional fallback models are provided through `ModelFallbackMiddleware`.
-- Fallback retries happen at the model-call layer only; they do not add graph edges or retry nodes.
-
-Example:
+## Agent Configuration
 
 ```yaml
-default_provider: openai
-
-providers:
-  openai:
-    chat_model: gpt-4.1-mini
-    temperature: 0.3
-    top_p: 1.0
-    max_tokens: 2000
-    fallback:
-      provider: openai
-      chat_model: gpt-4.1-nano
-      temperature: 0.3
-      top_p: 1.0
-      max_tokens: 2000
+agents:
+  sentiment_classifier:
+    role: Customer feedback sentiment classifier
+    prompt: prompts/sentiment_classifier.md
+    provider: openai
+    model: gpt-4.1-mini
+    reads_state:
+      - normalized_feedback
+    writes_state:
+      - sentiment
+      - confidence
+      - sentiment_reason
+    output_mapping:
+      sentiment: sentiment
+      confidence: confidence
+      reason: sentiment_reason
+    tools: []
+    mcp_servers: []
 ```
 
-These deployment/runtime values are handled through centralized settings and then consumed by the runtime:
+Tool-backed agents list configured tool names in `tools`. Tool definitions use a
+factory reference in `config/tools.yaml`:
 
-- `API_HOST`
-  Used by uvicorn server startup.
-- `PORT`
-  Used by uvicorn server startup.
-  Default: `8089`
-- `API_ROOT_PATH`
-  Normalized through `normalized_api_root_path` and applied to FastAPI `root_path`.
-- `OUTPUT_DIR`
-  Used to build the final report output directory.
-  Default: `output/`
-- `REPORT_OUTPUT_FILE`
-  Used to build the final report output filename.
-- `AZURE_KEY_VAULT_URL`
-  Used by the Azure Key Vault secret manager when `CLOUD_PROVIDER=AZURE`.
-- `CONTEXT`
-  Defaults to `/` and is used as the fallback source for API root-path normalization when `API_ROOT_PATH` is not set.
-
-## Secrets Manager
-
-**File:** `src/latest_ai_development/secrets_manager.py`
-
-Provides secure access to:
-
-- OpenAI API keys
-- AWS credentials
-- Environment secrets
-- External service tokens
-
-AWS Secrets Manager integration is supported.
-
-Current template behavior:
-
-- `CLOUD_PROVIDER=AWS` uses AWS Secrets Manager
-- `CLOUD_PROVIDER=AZURE` uses Azure Key Vault
-- empty/unset `CLOUD_PROVIDER` is treated as local-development mode
-
-Local-development mode:
-
-- secret-related environment variables are treated as direct values
-- this allows local runs without external secret-manager dependencies
-
-Typical API key configuration:
-
-- OpenAI:
-  - direct value: `OPENAI_API_KEY`
-  - secret reference: `OPENAI_API_KEY_SECRET`
-- Anthropic:
-  - direct value: `ANTHROPICAI_API_KEY`
-  - secret reference: `ANTHROPICAI_API_KEY_SECRET`
-- Gemini:
-  - direct value: `GEMINIAI_API_KEY`
-  - secret reference: `GEMINIAI_API_KEY_SECRET`
-- Bedrock:
-  - direct value: `BEDROCK_AI_API_KEY`
-  - secret reference: `BEDROCK_AI_API_KEY_SECRET`
-
-## Observability and Tracing
-
-- LangSmith tracing is optional for this template
-- tracing is controlled through `TRACING_BACKEND`
-- the template enables LangSmith during FastAPI app startup only when `TRACING_BACKEND=LANGSMITH`
-- if LangSmith initialization fails, the app falls back to no tracing and continues to start
-
-LangSmith configuration:
-
-- set `TRACING_BACKEND=LANGSMITH` to enable LangSmith tracing
-- leave `TRACING_BACKEND` unset, or set `TRACING_BACKEND=NONE`, to run without tracing
-- API key can come from:
-  - `LANGSMITH_API_KEY`
-  - `LANGCHAIN_API_KEY`
-  - `LANGSMITH_API_KEY_SECRET`
-  - `LANGCHAIN_API_KEY_SECRET`
-- project name can be provided with `LANGSMITH_PROJECT`
-- workflow and node trace shapes can be customized in `src/latest_ai_development/config/graph_config.yaml` under `tracing.workflow` and `tracing.nodes`
-
-Supported tracing config fields in `graph_config.yaml`:
-
-- `enabled`
-- `name`
-- `run_type`
-- `tags`
-- `metadata`
-- `input_fields`
-- `output_fields`
-
-Startup order is:
-
-1. load settings
-2. configure logging
-3. validate configuration
-   - verifies the selected provider exists in `models.yaml`
-   - resolves the selected provider credentials before the app starts serving requests
-4. initialize workflow controller
-5. initialize tracing during app lifespan
-6. serve FastAPI routes
-
-## YAML-First Topology Changes
-
-This template intentionally does not use LangChain-style `workflow.yaml` or `stages.yaml`.
-
-For LangGraph changes:
-
-- update `src/latest_ai_development/config/graph_config.yaml` first when the topology changes
-- keep node behavior in `nodes/*_node_builder.py`
-- only update Python files beyond the node builders when the state contract, prompts, or API contract changes
-
-`graph/graph_builder.py` is now a generic compiler that reads `graph_config.yaml`, resolves Python builders and router functions, and builds the graph from that config.
-
-## Running
-
-Install dependencies:
-
-```bash
-uv sync
+```yaml
+tools:
+  country_data:
+    factory: latest_ai_development.tools.country_data:create_tool
+    description: Read-only country reference lookup.
+    connector:
+      category: RDBMS
+      type: SNOWFLAKE
+    factory_kwargs:
+      table_name: ak_country
+      read_only: true
 ```
 
-Run the FastAPI app:
+The generic registry imports the factory lazily, calls it with `factory_kwargs`,
+and caches the resulting tool. Optional `description`, `connector`, `tags`,
+`usage_guidelines`, and `non_usage_guidelines` document the tool contract. Keep
+credentials outside YAML; factories should read them from environment variables
+or the configured secrets manager.
 
-```bash
-uv run latest_ai_development
+MCP servers are declared separately in `config/mcp.yaml`:
+
+```yaml
+servers:
+  catalog:
+    transport: streamable_http
+    url: https://mcp.example.com/mcp
+    headers:
+      Authorization: ${MCP_CATALOG_AUTHORIZATION}
 ```
 
-Run the direct test helper:
+Supported configuration transports are `stdio`, `sse`, and `streamable_http`.
+This POC validates MCP declarations and agent references. Until an MCP adapter is
+added to the reusable runtime, startup validation rejects non-empty agent
+`mcp_servers` assignments instead of silently ignoring them.
 
-```bash
-uv run test
+For structured agent responses, replace `output_field` with an `output_mapping`.
+The runtime builds a Pydantic response schema from the mapping; keys are structured
+response fields and values are workflow state fields:
+
+```yaml
+writes_state:
+  - sentiment
+  - confidence
+output_mapping:
+  classification: sentiment
+  score: confidence
 ```
 
-Run with a trigger payload:
+## Graph Configuration
 
-```bash
-uv run run_with_trigger '{"topic":"Explain LangGraph workflow support"}'
+Agent nodes reference an entry from `agents.yaml`:
+
+```yaml
+nodes:
+  classify_sentiment:
+    type: agent
+    agent: sentiment_classifier
 ```
+
+Deterministic nodes reference a builder:
+
+```yaml
+nodes:
+  evaluate_feedback:
+    type: deterministic
+    builder: latest_ai_development.nodes.orchestration_node_builder:FeedbackOrchestrationNodeBuilder.build_evaluate_feedback
+```
+
+Use direct edges for unconditional execution:
+
+```yaml
+edges:
+  - from: service_recovery_response
+    to: policy_guidance
+```
+
+Use a state field and path map for ordinary conditional routing:
+
+```yaml
+conditional_edges:
+  - from: prepare_feedback
+    decision_field: validation_status
+    path_map:
+      valid: classify_sentiment
+      invalid: finalize_output
+```
+
+A conditional edge may use a custom `router` reference instead of
+`decision_field` when routing cannot be expressed through one state field:
+
+```yaml
+conditional_edges:
+  - from: evaluate_feedback
+    router: latest_ai_development.nodes.orchestration_node_builder:route_after_evaluation
+    path_map:
+      appreciation: appreciation_response
+      clarification: clarification_response
+      service_recovery: service_recovery_response
+      human_review: human_review
+```
+
+The router is ordinary testable Python and may evaluate several state fields. Keep
+the destinations in YAML so topology remains visible to configuration validation
+and workflow UIs. A node must not mix direct and conditional outgoing edges.
 
 ## API
 
-Health endpoint:
+Request:
 
-```text
-GET /health
-```
-
-Workflow endpoint:
-
-```text
+```http
 POST /ask
+Content-Type: application/json
+
+{"user_input": "The product is beautiful and I love it", "thread_id": "demo-1"}
 ```
 
-Example request:
+Response:
 
 ```json
 {
-  "topic": "Explain LangGraph workflow support"
+  "thread_id": "demo-1",
+  "status": "completed",
+  "final_response": "...",
+  "interrupts": []
 }
 ```
 
-## Testing
+The FastAPI path awaits `graph.ainvoke()` and never blocks the event loop with a
+synchronous graph call. Persistence is enabled through the configured checkpointer;
+when a node calls LangGraph `interrupt()`, send its returned `thread_id` and the
+user's answer to `POST /resume` as `{"thread_id":"demo-1","value":...}`.
+FastAPI lifespan validates configuration and compiles one reusable workflow at
+startup, then closes graph and registered tool resources during shutdown.
 
-Run the test suite:
+Health endpoint: `GET /health`.
+
+## Configuration
+
+Provider generation parameters and fallbacks live in `config/models.yaml`. Each
+agent selects its concrete `provider` and primary `model` in `config/agents.yaml`;
+there is no environment or provider-level primary model fallback.
+
+Common environment variables:
+
+- `OPENAI_API_KEY`, `ANTHROPICAI_API_KEY`, `GEMINIAI_API_KEY`, or
+  `BEDROCK_AI_API_KEY`.
+- `CLOUD_PROVIDER`: empty for local mode, `AWS`, or `AZURE`.
+- `AZURE_KEY_VAULT_URL` and `AWS_REGION`.
+- `TRACING_BACKEND`: `NONE` or `LANGSMITH`.
+- `LANGSMITH_API_KEY` and `LANGSMITH_PROJECT`.
+- `API_HOST`, `PORT`, and `API_ROOT_PATH`.
+- `OUTPUT_DIR` and `REPORT_OUTPUT_FILE`.
+
+## Running
 
 ```bash
-uv run --with pytest python -m pytest
+uv sync --all-extras
+uv run latest_ai_development
 ```
 
-## Notes
+Direct trigger:
 
-- Report persistence is controlled by `execution.save_output` in `src/latest_ai_development/config/graph_config.yaml`.
-- The template defaults `execution.save_output` to `false` for safer deployment on read-only container filesystems.
-- If you enable report persistence, set `OUTPUT_DIR` to a writable path such as a mounted volume or `/tmp/output`.
-- If report persistence is enabled but the target path is not writable, `workflow.py` logs a warning instead of failing the `/ask` request.
-- LangSmith tracing is initialized during app startup through `tracking.py` only when `LANGSMITH_TRACING=true`.
-- Secret resolution is centralized through `secrets_manager.py` and respects the configured cloud provider.
+```bash
+uv run run_with_trigger '{"user_input":"The product is beautiful and I love it"}'
+```
+
+## Validation
+
+```bash
+uv sync --all-extras
+uv run pytest -q
+uv run ruff check src tests
+uv run mypy src
+uv run python -m compileall -q src tests
+git diff --check
+```
+
+Startup validation rejects undefined agents or tools, invalid references,
+undefined state reads/writes, unreachable nodes, paths without `END`, duplicate
+edges, invalid route targets, and nodes that mix direct and conditional outgoing
+routing.
+
+## Extension Rules
+
+For an ordinary agent addition, update only:
+
+1. `config/agents.yaml`.
+2. `config/graph_config.yaml`.
+3. A prompt file.
+4. `graph/state.py` only when the agent introduces new state fields.
+
+The generated workflow should pass `tests/test_template.py` unchanged. The suite
+derives its contract checks from configuration instead of hard-coding workflow
+agent names.
+
+Do not edit `graph/graph_builder.py`, `nodes/agent_node_builder.py`,
+`tools/tool_registry.py`, `workflow.py`, `main.py`, model fallback, or tracking for
+ordinary generated workflows.

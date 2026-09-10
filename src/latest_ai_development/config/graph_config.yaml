@@ -1,118 +1,103 @@
-entry_point: validate_input
-final_output_field: report
+entry_point: prepare_feedback
+end_nodes:
+  - finalize_output
+final_output_field: final_response
+
+persistence:
+  enabled: true
+  backend: memory
 
 execution:
   save_output: false
 
 nodes:
-  validate_input:
-    builder: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.build_validate_input
-  router_agent:
-    builder: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.build_router_agent
-  research:
-    builder: latest_ai_development.nodes.research_node_builder:ResearchNodeBuilder.build
-  reporting:
-    builder: latest_ai_development.nodes.reporting_node_builder:ReportingNodeBuilder.build
+  prepare_feedback:
+    type: deterministic
+    builder: latest_ai_development.nodes.orchestration_node_builder:FeedbackOrchestrationNodeBuilder.build_prepare_feedback
+  classify_sentiment:
+    type: agent
+    agent: sentiment_classifier
+  evaluate_feedback:
+    type: deterministic
+    builder: latest_ai_development.nodes.orchestration_node_builder:FeedbackOrchestrationNodeBuilder.build_evaluate_feedback
+  appreciation_response:
+    type: agent
+    agent: appreciation_responder
+  clarification_response:
+    type: agent
+    agent: clarification_responder
+  service_recovery_response:
+    type: agent
+    agent: service_recovery_responder
+  policy_guidance:
+    type: agent
+    agent: policy_advisor
+  human_review:
+    type: deterministic
+    builder: latest_ai_development.nodes.orchestration_node_builder:FeedbackOrchestrationNodeBuilder.build_human_review
   finalize_output:
-    builder: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.build_finalize_output
+    type: deterministic
+    builder: latest_ai_development.nodes.orchestration_node_builder:FeedbackOrchestrationNodeBuilder.build_finalize_output
 
 edges:
-  - from: validate_input
-    to: router_agent
-  - from: reporting
+  - from: classify_sentiment
+    to: evaluate_feedback
+  - from: appreciation_response
+    to: finalize_output
+  - from: clarification_response
+    to: finalize_output
+  - from: service_recovery_response
+    to: policy_guidance
+  - from: policy_guidance
+    to: finalize_output
+  - from: human_review
     to: finalize_output
   - from: finalize_output
     to: END
 
 conditional_edges:
-  - from: router_agent
-    router: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.route_after_router_agent
+  - from: prepare_feedback
+    decision_field: validation_status
     path_map:
-      research: research
-      reporting: reporting
-      finalize_output: finalize_output
-  - from: research
-    router: latest_ai_development.nodes.orchestration_node_builder:OrchestrationNodeBuilder.route_after_research
+      valid: classify_sentiment
+      invalid: finalize_output
+  - from: evaluate_feedback
+    router: latest_ai_development.nodes.orchestration_node_builder:route_after_evaluation
     path_map:
-      reporting: reporting
-      finalize_output: finalize_output
+      appreciation: appreciation_response
+      clarification: clarification_response
+      service_recovery: service_recovery_response
+      human_review: human_review
 
 tracing:
   workflow:
     enabled: true
-    name: Research Reporting Workflow
+    name: Customer Feedback Response Workflow
     run_type: chain
     tags:
       - workflow
       - langgraph
     metadata:
-      workflow_name: research_reporting
+      workflow_name: customer_feedback_response
       workflow_version: "1.0"
     input_fields:
       flow_run_id: flow_run_id
-      topic: inputs.topic
-      input_keys:
-        path: inputs
-        transform: keys
-      initial_state_keys:
-        path: initial_state
-        transform: keys
+      user_input: user_input
     output_fields:
-      topic: topic
-      keys:
-        path: .
-        transform: keys
-      has_report:
-        path: report
-        transform: bool
-      report_chars:
-        path: report
-        transform: len
-      research_result_chars:
-        path: research_result
-        transform: len
+      final_response: final_response
   nodes:
-    research:
+    classify_sentiment:
       enabled: true
-      name: Research Node
+      name: Sentiment Classification Node
       run_type: chain
       tags:
         - node
-        - research
-      metadata:
-        component_type: node
-        node_id: research
-      input_fields:
-        topic: state.topic
-        input_keys:
-          path: state
-          transform: keys
-      output_fields:
-        output_keys:
-          path: .
-          transform: keys
-        research_result_chars:
-          path: research_result
-          transform: len
-    reporting:
+        - classification
+    evaluate_feedback:
       enabled: true
-      name: Reporting Node
+      name: Weighted Feedback Evaluation Node
       run_type: chain
       tags:
         - node
-        - reporting
-      metadata:
-        component_type: node
-        node_id: reporting
-      input_fields:
-        topic: state.topic
-        research_result_chars:
-          path: state.research_result
-          transform: len
-      output_fields:
-        output_keys:
-          path: .
-          transform: keys
-        report_chars:
-          path: report
-          transform: len
+        - deterministic
+        - routing

@@ -6,72 +6,74 @@ from functools import wraps
 from importlib import import_module
 from typing import Any, cast
 
-from langgraph.graph import END, StateGraph
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
 
 from latest_ai_development.config.settings import get_graph_config
-from latest_ai_development.graph.state import State
+from latest_ai_development.graph.state import InputState, OutputState, State
 from latest_ai_development.logging_utils import summarize_state_delta, summarize_state_keys
-from latest_ai_development.tracking import trace_node_execution
+from latest_ai_development.nodes.agent_node_builder import AgentNodeBuilder
+from latest_ai_development.tracking import atrace_node_execution
 
 logger = logging.getLogger(__name__)
 
 
 class GraphBuilder:
     @staticmethod
-    def _resolve_reference(reference: str):
+    def _resolve_reference(reference: str) -> Callable[..., Any]:
         module_path, separator, attribute_path = reference.partition(":")
         if not separator or not module_path or not attribute_path:
             raise ValueError(
                 f"Callable reference '{reference}' must use '<module>:<attribute>' format"
             )
 
-        module = import_module(module_path)
-        resolved = module
+        resolved: Any = import_module(module_path)
         for attribute_name in attribute_path.split("."):
             resolved = getattr(resolved, attribute_name)
 
         if not callable(resolved):
             raise TypeError(f"Resolved reference '{reference}' is not callable")
-
-        return resolved
+        return cast(Callable[..., Any], resolved)
 
     @classmethod
-    def _resolve_node_callable(cls, reference: str):
-        builder = cls._resolve_reference(reference)
+    def _resolve_node_callable(
+        cls,
+        node_id: str,
+        node_config: Mapping[str, Any],
+    ) -> Callable[..., Any]:
+        if node_config.get("type") == "agent":
+            return AgentNodeBuilder.build(
+                node_id=node_id,
+                agent_id=str(node_config["agent"]),
+            )
+
+        builder = cls._resolve_reference(str(node_config["builder"]))
         node_callable = builder()
         if not callable(node_callable):
-            raise TypeError(f"Builder '{reference}' did not return a callable node")
-        return node_callable
-
-    @staticmethod
-    def _wrap_node(node_id: str, node_callable):
-        def wrapped_node(state):
-            return trace_node_execution(node_id, node_callable, state=state)
-
-        return wrapped_node
-
-    @staticmethod
-    def _resolve_target(target: str):
-        return END if target == "END" else target
+            raise TypeError(f"Builder '{node_config['builder']}' did not return a callable node")
+        return cast(Callable[..., Any], node_callable)
 
     @staticmethod
     def _as_state_mapping(value: Any) -> Mapping[str, Any] | None:
         return value if isinstance(value, Mapping) else None
 
     @classmethod
-    def _wrap_node_callable(cls, node_id: str, node_callable: Callable[..., Any]) -> Callable[..., Any]:
+    def _wrap_node_callable(
+        cls,
+        node_id: str,
+        node_callable: Callable[..., Any],
+    ) -> Callable[..., Any]:
         @wraps(node_callable)
-        def wrapped_node(*args: Any, **kwargs: Any) -> Any:
-            state = cls._as_state_mapping(args[0] if args else None)
+        async def wrapped_node(state: State, /) -> Any:
+            input_state = cls._as_state_mapping(state)
             logger.info("Node entered | node_id=%s", node_id)
             logger.debug(
                 "Node input snapshot | node_id=%s | state_keys=%s",
                 node_id,
-                summarize_state_keys(state),
+                summarize_state_keys(input_state),
             )
-
             try:
-                result = node_callable(*args, **kwargs)
+                result = await atrace_node_execution(node_id, node_callable, state=state)
             except Exception:
                 logger.exception("Node failed | node_id=%s", node_id)
                 raise
@@ -82,30 +84,26 @@ class GraphBuilder:
                 "Node output snapshot | node_id=%s | state_keys=%s | delta=%s",
                 node_id,
                 summarize_state_keys(result_state),
-                summarize_state_delta(state, result_state),
+                summarize_state_delta(input_state, result_state),
             )
             return result
 
         return wrapped_node
 
     @classmethod
-    def _wrap_router_callable(cls, source_node_id: str, router_callable: Callable[..., Any]) -> Callable[..., Any]:
+    def _wrap_router_callable(
+        cls,
+        source_node_id: str,
+        router_callable: Callable[..., Any],
+    ) -> Callable[..., Any]:
         @wraps(router_callable)
-        def wrapped_router(*args: Any, **kwargs: Any) -> Any:
-            state = cls._as_state_mapping(args[0] if args else None)
+        def wrapped_router(state: State, /) -> Any:
             logger.info("Router evaluated | source_node=%s", source_node_id)
-            logger.debug(
-                "Router input snapshot | source_node=%s | state_keys=%s",
-                source_node_id,
-                summarize_state_keys(state),
-            )
-
             try:
-                decision = router_callable(*args, **kwargs)
+                decision = router_callable(state)
             except Exception:
                 logger.exception("Router failed | source_node=%s", source_node_id)
                 raise
-
             logger.info(
                 "Router selected path | source_node=%s | decision=%s",
                 source_node_id,
@@ -116,63 +114,92 @@ class GraphBuilder:
         return wrapped_router
 
     @staticmethod
-    def build():
-        graph_cfg = get_graph_config()
+    def _build_state_router(
+        source_node_id: str,
+        decision_field: str,
+        path_map: Mapping[str, Any],
+        default_route: str | None,
+    ) -> Callable[[State], str]:
+        def route_from_state(state: State, /) -> str:
+            decision = str(state.get(decision_field, "")).strip()
+            if decision in path_map:
+                return decision
+            if default_route and default_route in path_map:
+                logger.info(
+                    "Router used default path | source_node=%s | decision=%s | default=%s",
+                    source_node_id,
+                    decision or "<empty>",
+                    default_route,
+                )
+                return default_route
+            raise ValueError(
+                f"Node '{source_node_id}' produced unsupported routing value "
+                f"'{decision}' for state field '{decision_field}'"
+            )
+
+        return route_from_state
+
+    @staticmethod
+    def _resolve_target(target: str) -> Any:
+        return END if target == "END" else target
+
+    @staticmethod
+    def _build_checkpointer(graph_config: Mapping[str, Any]) -> InMemorySaver | None:
+        persistence = graph_config.get("persistence", {})
+        if not isinstance(persistence, Mapping) or not persistence.get("enabled", False):
+            return None
+        backend = str(persistence.get("backend", "memory")).strip().lower()
+        if backend != "memory":
+            raise ValueError(f"Unsupported persistence backend '{backend}'")
+        return InMemorySaver()
+
+    @classmethod
+    def build(cls):
+        graph_config = get_graph_config()
+        nodes = graph_config["nodes"]
         logger.info(
             "Graph compilation started | entry_point=%s | final_output_field=%s | node_count=%s",
-            graph_cfg.get("entry_point"),
-            graph_cfg.get("final_output_field"),
-            len(graph_cfg.get("nodes", {})),
+            graph_config.get("entry_point"),
+            graph_config.get("final_output_field"),
+            len(nodes),
         )
-        logger.debug("Graph configuration nodes=%s", sorted(graph_cfg.get("nodes", {}).keys()))
-        workflow = StateGraph(State)
-        for node_id, node_cfg in graph_cfg["nodes"].items():
-            logger.info(
-                "Creating node callable | node_id=%s | builder=%s",
-                node_id,
-                node_cfg["builder"],
-            )
-            node_callable = GraphBuilder._resolve_node_callable(node_cfg["builder"])
+
+        workflow = StateGraph(State, input_schema=InputState, output_schema=OutputState)
+        for node_id, node_config in nodes.items():
+            node_callable = cls._resolve_node_callable(node_id, node_config)
             workflow.add_node(
                 node_id,
-                cast(Any, GraphBuilder._wrap_node(node_id, node_callable)),
+                cast(Any, cls._wrap_node_callable(node_id, node_callable)),
             )
 
-        workflow.set_entry_point(str(graph_cfg["entry_point"]))
-        logger.info("Graph entry point registered | entry_point=%s", graph_cfg["entry_point"])
-
-        for edge_cfg in graph_cfg.get("edges", []):
-            logger.debug(
-                "Registering edge | from=%s | to=%s",
-                edge_cfg["from"],
-                edge_cfg["to"],
-            )
+        workflow.add_edge(START, str(graph_config["entry_point"]))
+        for edge_config in graph_config.get("edges", []):
             workflow.add_edge(
-                str(edge_cfg["from"]),
-                GraphBuilder._resolve_target(str(edge_cfg["to"])),
+                str(edge_config["from"]),
+                cls._resolve_target(str(edge_config["to"])),
             )
-        for conditional_cfg in graph_cfg.get("conditional_edges", []):
-            logger.info(
-                "Registering conditional edges | source_node=%s | router=%s",
-                conditional_cfg["from"],
-                conditional_cfg["router"],
-            )
-            router_callable = GraphBuilder._resolve_reference(str(conditional_cfg["router"]))
+
+        for conditional_config in graph_config.get("conditional_edges", []):
+            source = str(conditional_config["from"])
             path_map = {
-                str(label): GraphBuilder._resolve_target(str(target))
-                for label, target in conditional_cfg["path_map"].items()
+                str(label): cls._resolve_target(str(target))
+                for label, target in conditional_config["path_map"].items()
             }
-            logger.debug(
-                "Conditional edge map | source_node=%s | path_map=%s",
-                conditional_cfg["from"],
-                path_map,
-            )
+            router_reference = conditional_config.get("router")
+            if router_reference:
+                router = cls._resolve_reference(str(router_reference))
+            else:
+                router = cls._build_state_router(
+                    source,
+                    str(conditional_config["decision_field"]),
+                    path_map,
+                    conditional_config.get("default_route"),
+                )
             workflow.add_conditional_edges(
-                str(conditional_cfg["from"]),
-                cast(Any, GraphBuilder._wrap_router_callable(str(conditional_cfg["from"]), router_callable)),
+                source,
+                cast(Any, cls._wrap_router_callable(source, router)),
                 cast(Any, path_map),
             )
 
-        compiled_graph = workflow.compile()
         logger.info("Graph compilation completed")
-        return compiled_graph
+        return workflow.compile(checkpointer=cls._build_checkpointer(graph_config))

@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import logging
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
-from langchain_core.language_models.chat_models import BaseChatModel
 
 from latest_ai_development.llm.model_settings import (
     ModelSettings,
     get_fallback_model_settings,
     get_model_settings,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,12 @@ class LLMFactory:
     - Steps should call LLMFactory().create_llm().
     """
 
-    def create_llm(self, provider: str | None = None, *, section: str = "primary") -> BaseChatModel:
+    def create_llm(
+        self,
+        provider: str,
+        *,
+        model: str,
+    ) -> BaseChatModel:
         """
         Resolve settings from centralized config and create the model.
 
@@ -38,7 +42,10 @@ class LLMFactory:
         - Bedrock
         - Ollama
         """
-        settings = get_model_settings(provider_name=provider, section=section)
+        settings = get_model_settings(
+            provider_name=provider,
+            model_name=model,
+        )
         return self.create(settings)
 
     def create(self, model_settings: ModelSettings) -> BaseChatModel:
@@ -62,7 +69,7 @@ class LLMFactory:
                 model=model_settings.model,
                 temperature=model_settings.temperature,
                 api_key=model_settings.extra.get("api_key"),
-                max_tokens=model_settings.max_tokens,
+                max_completion_tokens=model_settings.max_tokens,
             )
 
         if provider == "anthropicai":
@@ -75,10 +82,12 @@ class LLMFactory:
                 ) from exc
 
             return ChatAnthropic(
-                model=model_settings.model,
+                model_name=model_settings.model,
                 temperature=model_settings.temperature,
                 api_key=model_settings.extra.get("api_key"),
-                max_tokens=model_settings.max_tokens,
+                max_tokens_to_sample=model_settings.max_tokens,
+                timeout=None,
+                stop=None,
             )
 
         if provider == "geminiai":
@@ -123,6 +132,6 @@ class LLMFactory:
         raise ValueError(f"Unsupported provider: {provider}")
 
 
-def get_fallback_llms(provider: str | None = None) -> list[BaseChatModel]:
+def get_fallback_llms(provider: str) -> list[BaseChatModel]:
     factory = LLMFactory()
     return [factory.create(settings) for settings in get_fallback_model_settings(provider)]

@@ -1,0 +1,80 @@
+agents:
+  sentiment_classifier:
+    role: Customer feedback sentiment classifier
+    prompt: prompts/sentiment_classifier.md
+    provider: openai
+    model: gpt-4.1-mini
+    reads_state:
+      - normalized_feedback
+    writes_state:
+      - sentiment
+      - confidence
+      - sentiment_reason
+    output_mapping:
+      sentiment: sentiment
+      confidence: confidence
+      reason: sentiment_reason
+    tools: []
+    mcp_servers: []
+
+  appreciation_responder:
+    role: Customer appreciation response specialist
+    prompt: prompts/appreciation_responder.md
+    provider: openai
+    model: gpt-4.1-mini
+    reads_state:
+      - normalized_feedback
+      - sentiment_reason
+    writes_state:
+      - final_response
+    output_field: final_response
+    tools: []
+    mcp_servers: []
+
+  clarification_responder:
+    role: Customer feedback clarification specialist
+    prompt: prompts/clarification_responder.md
+    provider: openai
+    model: gpt-4.1-mini
+    reads_state:
+      - normalized_feedback
+      - sentiment
+      - confidence
+    writes_state:
+      - final_response
+    output_field: final_response
+    tools: []
+    mcp_servers: []
+
+  service_recovery_responder:
+    role: Customer service recovery specialist
+    prompt: prompts/service_recovery_responder.md
+    provider: openai
+    model: gpt-4.1-mini
+    reads_state:
+      - normalized_feedback
+      - sentiment_reason
+      - urgency_score
+    writes_state:
+      - draft_response
+    output_field: draft_response
+    tools: []
+    mcp_servers: []
+
+  policy_advisor:
+    role: Customer service policy advisor
+    prompt: prompts/policy_advisor.md
+    provider: openai
+    model: gpt-4.1-mini
+    reads_state:
+      - normalized_feedback
+      - draft_response
+      - policy_risk_score
+    writes_state:
+      - policy_guidance
+      - final_response
+    output_mapping:
+      policy_guidance: policy_guidance
+      customer_response: final_response
+    tools: []
+    mcp_servers: []
