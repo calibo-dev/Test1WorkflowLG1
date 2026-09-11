@@ -178,6 +178,59 @@ The router is ordinary testable Python and may evaluate several state fields. Ke
 the destinations in YAML so topology remains visible to configuration validation
 and workflow UIs. A node must not mix direct and conditional outgoing edges.
 
+Use `Command(update=..., goto=...)` when one node must atomically update state and
+choose its next node. Declare every possible destination on that node so graph
+visualization and configuration validation still know the topology:
+
+```yaml
+nodes:
+  approval_gate:
+    type: deterministic
+    builder: latest_ai_development.nodes.approval:build_approval_gate
+    command_destinations:
+      - approved_work
+      - rejected_response
+```
+
+The callable returned by the builder returns `Command(update={...}, goto=...)`.
+Do not also give that source a direct or conditional outgoing route.
+
+Use `Send` only for dynamic fan-out, where the number of worker invocations is
+known at runtime rather than design time:
+
+```yaml
+conditional_edges:
+  - from: plan_work
+    router: latest_ai_development.nodes.planning:dispatch_work
+    send_destinations:
+      - worker
+```
+
+`dispatch_work(state)` returns one `Send("worker", worker_input)` per work item.
+The declared destinations are used for validation; the router's returned `Send`
+objects carry the per-worker inputs.
+
+Per-request dependencies and configuration belong in LangGraph runtime context,
+not persisted workflow state. Define default values under `runtime_context` and
+override them through the API request's `context` object. A node that needs these
+values accepts a second `runtime` argument and reads `runtime.context["values"]`:
+
+```yaml
+runtime_context:
+  defaults:
+    locale: en-US
+```
+
+```python
+def node(state: State, runtime: Runtime[RuntimeContext]) -> dict[str, str]:
+    locale = runtime.context["values"]["locale"]
+    return {"draft_response": render(state, locale=locale)}
+```
+
+Ordinary nodes remain one-argument callables. These advanced features are
+independent and opt-in; subgraphs are intentionally outside the current template
+contract.
+
 ## API
 
 Request:
@@ -186,7 +239,7 @@ Request:
 POST /ask
 Content-Type: application/json
 
-{"user_input": "The product is beautiful and I love it", "thread_id": "demo-1"}
+{"user_input": "The product is beautiful and I love it", "thread_id": "demo-1", "context": {"locale": "en-US"}}
 ```
 
 Response:

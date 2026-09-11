@@ -9,6 +9,7 @@ from uuid import uuid4
 from langgraph.types import Command
 
 from latest_ai_development.config.settings import get_graph_config, get_settings
+from latest_ai_development.graph.context import RuntimeContext
 from latest_ai_development.graph.graph_builder import GraphBuilder
 from latest_ai_development.graph.state import State
 from latest_ai_development.logging_utils import configure_logging, summarize_state_keys
@@ -68,12 +69,22 @@ class LatestAiDevelopmentWorkflow:
         )
         return initial_state
 
+    def build_runtime_context(
+        self,
+        overrides: dict[str, Any] | None = None,
+    ) -> RuntimeContext:
+        configured_defaults = self.graph_config.get("runtime_context", {}).get("defaults", {})
+        values = dict(configured_defaults)
+        values.update(overrides or {})
+        return {"values": values}
+
     async def akickoff(
         self,
         inputs: dict[str, Any],
         flow_run_id: str | None = None,
         *,
         thread_id: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> State:
         user_input = str(inputs.get("user_input", "") or "")
         flow_run_id = str(flow_run_id or inputs.get("flow_run_id") or uuid4().hex[:12]).strip()
@@ -93,6 +104,7 @@ class LatestAiDevelopmentWorkflow:
             flow_run_id=flow_run_id,
             inputs=inputs,
             thread_id=thread_id,
+            context=self.build_runtime_context(context or inputs.get("context")),
         )
         self._save_result(result, flow_run_id=flow_run_id)
         logger.info("Workflow completed | flow_run_id=%s", flow_run_id)
@@ -104,6 +116,7 @@ class LatestAiDevelopmentWorkflow:
         thread_id: str,
         value: Any,
         flow_run_id: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> State:
         flow_run_id = str(flow_run_id or uuid4().hex[:12])
         result = await self._ainvoke(
@@ -111,6 +124,7 @@ class LatestAiDevelopmentWorkflow:
             flow_run_id=flow_run_id,
             inputs={"thread_id": thread_id, "resume": value},
             thread_id=thread_id,
+            context=self.build_runtime_context(context),
         )
         self._save_result(result, flow_run_id=flow_run_id)
         return result
@@ -122,10 +136,11 @@ class LatestAiDevelopmentWorkflow:
         flow_run_id: str,
         inputs: dict[str, Any],
         thread_id: str,
+        context: RuntimeContext,
     ) -> State:
         config = {"configurable": {"thread_id": thread_id}}
         return await atrace_workflow_execution(
-            lambda value: self.get_graph().ainvoke(value, config=config),
+            lambda value: self.get_graph().ainvoke(value, config=config, context=context),
             flow_run_id=flow_run_id,
             inputs=inputs,
             initial_state=graph_input,
@@ -155,8 +170,14 @@ class LatestAiDevelopmentWorkflow:
         flow_run_id: str | None = None,
         *,
         thread_id: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> State:
         """Synchronous boundary for CLI callers; async servers should use akickoff."""
         return asyncio.run(
-            self.akickoff(inputs, flow_run_id=flow_run_id, thread_id=thread_id)
+            self.akickoff(
+                inputs,
+                flow_run_id=flow_run_id,
+                thread_id=thread_id,
+                context=context,
+            )
         )

@@ -73,10 +73,18 @@ Enable a supported checkpointer in `graph_config.yaml` and always pass a stable
 - Use `conditional_edges` for mutually exclusive runtime branches.
 - Prefer `decision_field` plus `path_map`.
 - Use a custom `router` only when one state field cannot express the decision.
-- Do not configure direct and conditional outgoing edges from the same node.
+- Use `command_destinations` when a node returns `Command(update=..., goto=...)`.
+- Use `send_destinations` with a custom router when it returns dynamic `Send`
+  fan-out instructions.
+- Do not configure more than one outgoing mechanism on a node: direct edges,
+  conditional edges, or `Command` destinations.
 - Every configured node must be reachable from `entry_point`.
 - Every reachable path must be able to terminate at `END`.
-- Every `end_nodes` entry must have a direct edge to `END`.
+- Every `end_nodes` entry must route only to `END`.
+
+Use `runtime.context["values"]` for per-invocation dependencies and settings that
+must not be persisted in graph state. Add defaults under `runtime_context` in
+`graph_config.yaml`; do not copy runtime context into `State`.
 
 ## Tools
 

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from langgraph.types import Command, interrupt
+from langgraph.types import Command, Send, interrupt
 
 from latest_ai_development.config import validators
 from latest_ai_development.config.settings import (
@@ -120,6 +120,127 @@ def test_graph_builder_compiles_direct_and_conditional_routes(monkeypatch):
     assert result["final_response"] == "result: ready"
 
 
+def test_graph_builder_passes_runtime_context_to_nodes(monkeypatch):
+    graph_config = {
+        "entry_point": "context_node",
+        "end_nodes": ["context_node"],
+        "final_output_field": "final_response",
+        "runtime_context": {"defaults": {"prefix": "default"}},
+        "nodes": {
+            "context_node": {"type": "deterministic", "builder": "test:context"},
+        },
+        "edges": [{"from": "context_node", "to": "END"}],
+        "conditional_edges": [],
+    }
+
+    def build_context_node():
+        def context_node(state, runtime):
+            return {
+                "final_response": f"{runtime.context['values']['prefix']}: {state['user_input']}"
+            }
+
+        return context_node
+
+    monkeypatch.setattr(
+        "latest_ai_development.graph.graph_builder.get_graph_config",
+        lambda: graph_config,
+    )
+    monkeypatch.setattr(
+        GraphBuilder,
+        "_resolve_reference",
+        staticmethod(lambda _reference: build_context_node),
+    )
+
+    result = asyncio.run(
+        GraphBuilder.build().ainvoke(
+            {"user_input": "request"},
+            context={"values": {"prefix": "tenant-a"}},
+        )
+    )
+
+    assert result["final_response"] == "tenant-a: request"
+
+
+def test_graph_builder_supports_command_routing(monkeypatch):
+    graph_config = {
+        "entry_point": "route",
+        "end_nodes": ["finish"],
+        "final_output_field": "final_response",
+        "nodes": {
+            "route": {
+                "type": "deterministic",
+                "builder": "test:route",
+                "command_destinations": ["finish"],
+            },
+            "finish": {"type": "deterministic", "builder": "test:finish"},
+        },
+        "edges": [{"from": "finish", "to": "END"}],
+        "conditional_edges": [],
+    }
+    builders = {
+        "test:route": lambda: (
+            lambda _state: Command(
+                update={"draft_response": "routed"},
+                goto="finish",
+            )
+        ),
+        "test:finish": lambda: lambda state: {"final_response": state["draft_response"]},
+    }
+    monkeypatch.setattr(
+        "latest_ai_development.graph.graph_builder.get_graph_config",
+        lambda: graph_config,
+    )
+    monkeypatch.setattr(
+        GraphBuilder,
+        "_resolve_reference",
+        staticmethod(lambda reference: builders[reference]),
+    )
+
+    result = asyncio.run(GraphBuilder.build().ainvoke({"user_input": "request"}))
+
+    assert result["final_response"] == "routed"
+
+
+def test_graph_builder_supports_dynamic_send_fanout(monkeypatch):
+    graph_config = {
+        "entry_point": "dispatch",
+        "end_nodes": ["worker"],
+        "final_output_field": "final_response",
+        "nodes": {
+            "dispatch": {"type": "deterministic", "builder": "test:dispatch"},
+            "worker": {"type": "deterministic", "builder": "test:worker"},
+        },
+        "edges": [{"from": "worker", "to": "END"}],
+        "conditional_edges": [
+            {
+                "from": "dispatch",
+                "router": "test:fanout",
+                "send_destinations": ["worker"],
+            }
+        ],
+    }
+    builders = {
+        "test:dispatch": lambda: lambda _state: {},
+        "test:worker": lambda: lambda state: {"errors": [state["user_input"]]},
+        "test:fanout": lambda state: [
+            Send("worker", {"user_input": item.strip()}) for item in state["user_input"].split(",")
+        ],
+    }
+    monkeypatch.setattr(
+        "latest_ai_development.graph.graph_builder.get_graph_config",
+        lambda: graph_config,
+    )
+    monkeypatch.setattr(
+        GraphBuilder,
+        "_resolve_reference",
+        staticmethod(lambda reference: builders[reference]),
+    )
+
+    result = asyncio.run(GraphBuilder.build().ainvoke({"user_input": "one,two"}))
+
+    assert sorted(result["errors"]) == ["one", "two"]
+
+
 @pytest.mark.parametrize(
     ("agent_config", "content", "expected"),
     [
@@ -165,11 +286,13 @@ def test_agent_node_maps_model_output(monkeypatch, agent_config, content, expect
     monkeypatch.setattr(
         agent_node_builder.LLMFactory,
         "create_llm",
-        lambda self, provider=None, model=None, section="primary": captured.update(
-            selected_provider=provider,
-            selected_model=model,
-        )
-        or "llm",
+        lambda self, provider=None, model=None, section="primary": (
+            captured.update(
+                selected_provider=provider,
+                selected_model=model,
+            )
+            or "llm"
+        ),
     )
     monkeypatch.setattr(agent_node_builder, "get_tools_for_node", lambda _node_id: ["tool"])
 
@@ -296,13 +419,42 @@ def test_fastapi_lifespan_starts_and_closes_one_workflow(monkeypatch):
 def test_graph_validation_rejects_mixed_routing(monkeypatch):
     graph_config = deepcopy(get_graph_config())
     conditional_source = graph_config["conditional_edges"][0]["from"]
-    graph_config["edges"].append(
-        {"from": conditional_source, "to": graph_config["end_nodes"][0]}
-    )
+    graph_config["edges"].append({"from": conditional_source, "to": graph_config["end_nodes"][0]})
     monkeypatch.setattr(validators, "get_graph_config", lambda: graph_config)
 
     with pytest.raises(ValueError, match="cannot mix direct and conditional"):
         validators._validate_graph_config()
+
+
+def test_graph_validation_accepts_command_and_send_routes(monkeypatch):
+    graph_config = {
+        "entry_point": "route",
+        "end_nodes": ["worker"],
+        "final_output_field": "final_response",
+        "runtime_context": {"defaults": {"tenant": "default"}},
+        "nodes": {
+            "route": {
+                "type": "deterministic",
+                "builder": "test:route",
+                "command_destinations": ["dispatch"],
+            },
+            "dispatch": {"type": "deterministic", "builder": "test:dispatch"},
+            "worker": {"type": "deterministic", "builder": "test:worker"},
+        },
+        "edges": [{"from": "worker", "to": "END"}],
+        "conditional_edges": [
+            {
+                "from": "dispatch",
+                "router": "test:fanout",
+                "send_destinations": ["worker"],
+            }
+        ],
+    }
+    monkeypatch.setattr(validators, "get_graph_config", lambda: graph_config)
+    monkeypatch.setattr(validators, "get_agents_config", lambda: {"agents": {}})
+    monkeypatch.setattr(validators, "_resolve_reference", lambda _reference: lambda: None)
+
+    validators._validate_graph_config()
 
 
 @pytest.mark.parametrize(

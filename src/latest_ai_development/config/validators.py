@@ -253,9 +253,7 @@ def _validate_graph_config() -> None:
     if not isinstance(final_output_field, str) or not final_output_field.strip():
         raise ValueError("graph_config.yaml must define a non-empty final_output_field")
     if final_output_field not in OutputState.__annotations__:
-        raise ValueError(
-            "graph_config.yaml final_output_field must be declared in OutputState"
-        )
+        raise ValueError("graph_config.yaml final_output_field must be declared in OutputState")
 
     persistence = graph_config.get("persistence", {})
     if not isinstance(persistence, Mapping):
@@ -265,6 +263,12 @@ def _validate_graph_config() -> None:
         if backend != "memory":
             raise ValueError(f"Unsupported persistence backend '{backend}'")
 
+    runtime_context = graph_config.get("runtime_context", {})
+    if not isinstance(runtime_context, Mapping):
+        raise ValueError("graph_config.yaml runtime_context must be a mapping")
+    if not isinstance(runtime_context.get("defaults", {}), Mapping):
+        raise ValueError("graph_config.yaml runtime_context defaults must be a mapping")
+
     end_nodes = _require_string_list(
         graph_config.get("end_nodes", []),
         field_name="graph_config.yaml end_nodes",
@@ -272,6 +276,8 @@ def _validate_graph_config() -> None:
     if not end_nodes or not set(end_nodes).issubset(node_ids):
         raise ValueError("graph_config.yaml end_nodes must reference defined nodes")
 
+    command_sources: set[str] = set()
+    command_destinations_by_source: dict[str, list[str]] = {}
     for node_id, node_config in nodes.items():
         if not isinstance(node_id, str) or not node_id.strip():
             raise ValueError("graph_config.yaml node ids must be non-empty strings")
@@ -295,6 +301,26 @@ def _validate_graph_config() -> None:
                 f"graph_config.yaml node '{node_id}' type must be agent or deterministic"
             )
 
+        if "command_destinations" in node_config:
+            destinations = _require_string_list(
+                node_config["command_destinations"],
+                field_name=f"Node '{node_id}' command_destinations",
+            )
+            if not destinations:
+                raise ValueError(f"Node '{node_id}' command_destinations must not be empty")
+            if len(destinations) != len(set(destinations)):
+                raise ValueError(f"Node '{node_id}' command_destinations contains duplicates")
+            unknown_destinations = {
+                target for target in destinations if target != "END" and target not in node_ids
+            }
+            if unknown_destinations:
+                raise ValueError(
+                    f"Node '{node_id}' command_destinations reference undefined nodes: "
+                    f"{sorted(unknown_destinations)}"
+                )
+            command_sources.add(str(node_id))
+            command_destinations_by_source[str(node_id)] = destinations
+
     adjacency: dict[str, set[str]] = defaultdict(set)
     reverse_adjacency: dict[str, set[str]] = defaultdict(set)
     direct_sources: set[str] = set()
@@ -316,6 +342,11 @@ def _validate_graph_config() -> None:
         adjacency[str(source)].add(str(target))
         reverse_adjacency[str(target)].add(str(source))
 
+    for source, destinations in command_destinations_by_source.items():
+        for target in destinations:
+            adjacency[source].add(target)
+            reverse_adjacency[target].add(source)
+
     conditional_sources: set[str] = set()
     for conditional_config in graph_config.get("conditional_edges", []):
         if not isinstance(conditional_config, Mapping):
@@ -329,15 +360,40 @@ def _validate_graph_config() -> None:
 
         router = conditional_config.get("router")
         decision_field = conditional_config.get("decision_field")
+        send_destinations = conditional_config.get("send_destinations")
+        if send_destinations is not None:
+            if not router or decision_field or "path_map" in conditional_config:
+                raise ValueError(
+                    f"Dynamic Send edge '{source}' must define router and send_destinations "
+                    "without decision_field or path_map"
+                )
+            destinations = _require_string_list(
+                send_destinations,
+                field_name=f"Dynamic Send edge '{source}' send_destinations",
+            )
+            if not destinations:
+                raise ValueError(
+                    f"Dynamic Send edge '{source}' send_destinations must not be empty"
+                )
+            unknown_destinations = set(destinations) - node_ids
+            if unknown_destinations:
+                raise ValueError(
+                    f"Dynamic Send edge '{source}' references undefined nodes: "
+                    f"{sorted(unknown_destinations)}"
+                )
+            _resolve_reference(str(router))
+            for target in destinations:
+                adjacency[str(source)].add(target)
+                reverse_adjacency[target].add(str(source))
+            continue
+
         if bool(router) == bool(decision_field):
             raise ValueError(
                 f"Conditional edge '{source}' must define exactly one of router or decision_field"
             )
         if router:
             _resolve_reference(str(router))
-        elif decision_field not in (
-            set(InputState.__annotations__) | set(State.__annotations__)
-        ):
+        elif decision_field not in (set(InputState.__annotations__) | set(State.__annotations__)):
             raise ValueError(
                 f"Conditional edge '{source}' references undefined state field '{decision_field}'"
             )
@@ -359,10 +415,15 @@ def _validate_graph_config() -> None:
         if default_route and default_route not in path_map:
             raise ValueError(f"Conditional edge '{source}' default_route must exist in path_map")
 
-    mixed_sources = direct_sources & conditional_sources
+    mixed_sources = (
+        (direct_sources & conditional_sources)
+        | (direct_sources & command_sources)
+        | (conditional_sources & command_sources)
+    )
     if mixed_sources:
         raise ValueError(
-            f"Nodes cannot mix direct and conditional outgoing edges: {sorted(mixed_sources)}"
+            "Nodes cannot mix direct and conditional outgoing edges or Command routes: "
+            f"{sorted(mixed_sources)}"
         )
 
     reachable = _walk_graph(str(entry_point), adjacency)
@@ -377,9 +438,7 @@ def _validate_graph_config() -> None:
 
     missing_end_edges = [node_id for node_id in end_nodes if "END" not in adjacency[node_id]]
     if missing_end_edges:
-        raise ValueError(
-            f"Configured end_nodes must have a direct edge to END: {sorted(missing_end_edges)}"
-        )
+        raise ValueError(f"Configured end_nodes must route to END: {sorted(missing_end_edges)}")
 
     invalid_end_edges = [node_id for node_id in end_nodes if adjacency[node_id] != {"END"}]
     if invalid_end_edges:

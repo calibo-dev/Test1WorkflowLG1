@@ -10,6 +10,9 @@ persistence:
 execution:
   save_output: false
 
+runtime_context:
+  defaults: {}
+
 nodes:
   prepare_feedback:
     type: deterministic

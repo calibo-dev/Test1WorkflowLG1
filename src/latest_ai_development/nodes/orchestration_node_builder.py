@@ -7,7 +7,6 @@ from langgraph.types import interrupt
 
 from latest_ai_development.graph.state import State
 
-
 RouteName = Literal["appreciation", "clarification", "service_recovery", "human_review"]
 
 

@@ -76,6 +76,7 @@ app = FastAPI(
 class AskRequest(BaseModel):
     user_input: str
     thread_id: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class AskResponse(BaseModel):
@@ -88,6 +89,7 @@ class AskResponse(BaseModel):
 class ResumeRequest(BaseModel):
     thread_id: str
     value: Any
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 def _get_workflow(request: Request) -> LatestAiDevelopmentWorkflow:
@@ -137,6 +139,7 @@ async def ask(request: AskRequest, http_request: Request):
             {"user_input": request.user_input},
             flow_run_id=flow_run_id,
             thread_id=thread_id,
+            context=request.context,
         )
     except Exception as exc:
         logger.exception(
@@ -161,7 +164,11 @@ async def ask(request: AskRequest, http_request: Request):
 async def resume(request: ResumeRequest, http_request: Request):
     workflow = _get_workflow(http_request)
     try:
-        result = await workflow.aresume(thread_id=request.thread_id, value=request.value)
+        result = await workflow.aresume(
+            thread_id=request.thread_id,
+            value=request.value,
+            context=request.context,
+        )
     except Exception as exc:
         logger.exception("Workflow resume failed | thread_id=%s", request.thread_id)
         raise HTTPException(status_code=500, detail="Workflow resume failed") from exc

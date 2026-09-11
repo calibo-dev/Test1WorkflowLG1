@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from functools import wraps
 from importlib import import_module
+from inspect import Parameter, signature
 from typing import Any, cast
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
 
 from latest_ai_development.config.settings import get_graph_config
+from latest_ai_development.graph.context import RuntimeContext
 from latest_ai_development.graph.state import InputState, OutputState, State
 from latest_ai_development.logging_utils import summarize_state_delta, summarize_state_keys
 from latest_ai_development.nodes.agent_node_builder import AgentNodeBuilder
@@ -57,14 +59,39 @@ class GraphBuilder:
     def _as_state_mapping(value: Any) -> Mapping[str, Any] | None:
         return value if isinstance(value, Mapping) else None
 
+    @staticmethod
+    def _invoke_with_runtime(
+        target: Callable[..., Any],
+        state: State,
+        runtime: Runtime[RuntimeContext],
+    ) -> Any:
+        """Pass Runtime only to callables that explicitly support it."""
+        try:
+            parameters = signature(target).parameters
+        except (TypeError, ValueError):
+            return target(state)
+
+        runtime_parameter = parameters.get("runtime")
+        if runtime_parameter is not None:
+            if runtime_parameter.kind == Parameter.KEYWORD_ONLY:
+                return target(state, runtime=runtime)
+            return target(state, runtime)
+        if any(parameter.kind == Parameter.VAR_KEYWORD for parameter in parameters.values()):
+            return target(state, runtime=runtime)
+        return target(state)
+
     @classmethod
     def _wrap_node_callable(
         cls,
         node_id: str,
         node_callable: Callable[..., Any],
     ) -> Callable[..., Any]:
-        @wraps(node_callable)
-        async def wrapped_node(state: State, /) -> Any:
+        async def wrapped_node(
+            state: State,
+            /,
+            *,
+            runtime: Runtime[RuntimeContext],
+        ) -> Any:
             input_state = cls._as_state_mapping(state)
             logger.info("Node entered | node_id=%s", node_id)
             logger.debug(
@@ -73,7 +100,15 @@ class GraphBuilder:
                 summarize_state_keys(input_state),
             )
             try:
-                result = await atrace_node_execution(node_id, node_callable, state=state)
+                result = await atrace_node_execution(
+                    node_id,
+                    lambda current_state: cls._invoke_with_runtime(
+                        node_callable,
+                        current_state,
+                        runtime,
+                    ),
+                    state=state,
+                )
             except Exception:
                 logger.exception("Node failed | node_id=%s", node_id)
                 raise
@@ -96,11 +131,15 @@ class GraphBuilder:
         source_node_id: str,
         router_callable: Callable[..., Any],
     ) -> Callable[..., Any]:
-        @wraps(router_callable)
-        def wrapped_router(state: State, /) -> Any:
+        def wrapped_router(
+            state: State,
+            /,
+            *,
+            runtime: Runtime[RuntimeContext],
+        ) -> Any:
             logger.info("Router evaluated | source_node=%s", source_node_id)
             try:
-                decision = router_callable(state)
+                decision = cls._invoke_with_runtime(router_callable, state, runtime)
             except Exception:
                 logger.exception("Router failed | source_node=%s", source_node_id)
                 raise
@@ -164,12 +203,22 @@ class GraphBuilder:
             len(nodes),
         )
 
-        workflow = StateGraph(State, input_schema=InputState, output_schema=OutputState)
+        workflow = StateGraph(
+            State,
+            context_schema=RuntimeContext,
+            input_schema=InputState,
+            output_schema=OutputState,
+        )
         for node_id, node_config in nodes.items():
             node_callable = cls._resolve_node_callable(node_id, node_config)
+            destinations = tuple(
+                cls._resolve_target(str(target))
+                for target in node_config.get("command_destinations", [])
+            )
             workflow.add_node(
                 node_id,
                 cast(Any, cls._wrap_node_callable(node_id, node_callable)),
+                destinations=destinations or None,
             )
 
         workflow.add_edge(START, str(graph_config["entry_point"]))
@@ -181,6 +230,15 @@ class GraphBuilder:
 
         for conditional_config in graph_config.get("conditional_edges", []):
             source = str(conditional_config["from"])
+            send_destinations = conditional_config.get("send_destinations")
+            if send_destinations is not None:
+                router = cls._resolve_reference(str(conditional_config["router"]))
+                workflow.add_conditional_edges(
+                    source,
+                    cast(Any, cls._wrap_router_callable(source, router)),
+                )
+                continue
+
             path_map = {
                 str(label): cls._resolve_target(str(target))
                 for label, target in conditional_config["path_map"].items()
