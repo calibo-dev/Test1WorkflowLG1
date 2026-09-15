@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
-from langchain_core.language_models.chat_models import BaseChatModel
 
 from latest_ai_development.llm.model_settings import (
     ModelSettings,
@@ -58,6 +58,13 @@ class LLMFactory:
         )
 
         if provider == "openai":
+            if model_settings.model.startswith("gpt-5"):
+                return ChatOpenAI(
+                    model=model_settings.model,
+                    api_key=model_settings.extra.get("api_key"),
+                    max_completion_tokens=model_settings.max_tokens,
+                )
+
             return ChatOpenAI(
                 model=model_settings.model,
                 temperature=model_settings.temperature,
