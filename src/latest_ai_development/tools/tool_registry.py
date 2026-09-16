@@ -23,12 +23,16 @@ def register_tool(name: str, tool: Any) -> None:
 
 def get_tools_by_names(tool_names: Sequence[str] | None) -> list[Any]:
     resolved_tools: list[Any] = []
+    seen_names: set[str] = set()
 
     for tool_name in tool_names or []:
         if not isinstance(tool_name, str):
             continue
 
         normalized_name = tool_name.strip()
+        if not normalized_name or normalized_name in seen_names:
+            continue
+        seen_names.add(normalized_name)
         tool = REGISTERED_TOOLS.get(normalized_name)
         if tool is None:
             tool = _load_configured_tool(normalized_name)

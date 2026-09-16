@@ -374,6 +374,74 @@ def test_tool_registry_passes_factory_configuration_and_caches_tool(monkeypatch)
     assert calls == [{"table_name": "ak_country", "read_only": True}]
 
 
+def test_tool_registry_supports_many_tools_on_one_node(monkeypatch):
+    first_tool = object()
+    second_tool = object()
+    monkeypatch.setattr(
+        tool_registry,
+        "get_graph_config",
+        lambda: {"nodes": {"worker_node": {"type": "agent", "agent": "worker"}}},
+    )
+    monkeypatch.setattr(
+        tool_registry,
+        "get_agents_config",
+        lambda: {
+            "agents": {
+                "worker": {"tools": ["first", "second", "first"]},
+            }
+        },
+    )
+    monkeypatch.setattr(tool_registry, "get_tools_config", lambda: {"tools": {}})
+    tool_registry.register_tool("first", first_tool)
+    tool_registry.register_tool("second", second_tool)
+
+    assert tool_registry.get_tools_for_node("worker_node") == [first_tool, second_tool]
+
+
+def test_tool_registry_reuses_one_tool_across_multiple_nodes(monkeypatch):
+    calls: list[str] = []
+    shared_tool = object()
+
+    def create_tool():
+        calls.append("created")
+        return shared_tool
+
+    monkeypatch.setattr(
+        tool_registry,
+        "get_graph_config",
+        lambda: {
+            "nodes": {
+                "first_node": {"type": "agent", "agent": "first_agent"},
+                "second_node": {"type": "agent", "agent": "second_agent"},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        tool_registry,
+        "get_agents_config",
+        lambda: {
+            "agents": {
+                "first_agent": {"tools": ["shared"]},
+                "second_agent": {"tools": ["shared"]},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        tool_registry,
+        "get_tools_config",
+        lambda: {"tools": {"shared": {"factory": "example.tools:create_tool"}}},
+    )
+    monkeypatch.setattr(
+        tool_registry,
+        "import_module",
+        lambda _module_name: SimpleNamespace(create_tool=create_tool),
+    )
+
+    assert tool_registry.get_tools_for_node("first_node") == [shared_tool]
+    assert tool_registry.get_tools_for_node("second_node") == [shared_tool]
+    assert calls == ["created"]
+
+
 def test_tool_resources_close_once_at_shutdown():
     class ClosableTool:
         def __init__(self):
@@ -537,8 +605,11 @@ def test_graph_interrupt_resumes_with_persisted_thread(monkeypatch):
 
 
 def test_workflow_builds_one_canonical_input_state():
-    state = LatestAiDevelopmentWorkflow().build_initial_state(user_input="request")
+    workflow = LatestAiDevelopmentWorkflow()
+    state = workflow.build_initial_state({"user_input": "request", "ignored": "value"})
 
     assert state["user_input"] == "request"
     assert state["errors"] == []
     assert set(state) == {"user_input", "errors"}
+    assert workflow.required_inputs() == ("user_input",)
+    assert workflow.output_fields() == ("final_response",)

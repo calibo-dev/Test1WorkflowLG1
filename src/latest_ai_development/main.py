@@ -67,23 +67,10 @@ async def lifespan(application: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
-    description="LangGraph workflow for routed customer feedback responses",
+    description="Configuration-driven LangGraph workflow",
     root_path=API_ROOT_PATH,
     lifespan=lifespan,
 )
-
-
-class AskRequest(BaseModel):
-    user_input: str
-    thread_id: str | None = None
-    context: dict[str, Any] = Field(default_factory=dict)
-
-
-class AskResponse(BaseModel):
-    thread_id: str
-    status: str
-    final_response: str
-    interrupts: list[Any] = Field(default_factory=list)
 
 
 class ResumeRequest(BaseModel):
@@ -104,15 +91,19 @@ def _build_response(
     *,
     workflow: LatestAiDevelopmentWorkflow,
     thread_id: str,
-) -> AskResponse:
+) -> dict[str, Any]:
     raw_interrupts = result.get("__interrupt__", [])  # type: ignore[typeddict-item]
     interrupts = [getattr(item, "value", item) for item in raw_interrupts]
-    return AskResponse(
+    response = {
+        field: result.get(field)
+        for field in workflow.output_fields()
+    }
+    response.update(
         thread_id=thread_id,
         status="interrupted" if interrupts else "completed",
-        final_response=str(result.get(workflow.final_output_field, "")),
         interrupts=interrupts,
     )
+    return response
 
 
 @app.get("/health")
@@ -123,11 +114,29 @@ async def health() -> dict[str, Any]:
     }
 
 
-@app.post("/ask", response_model=AskResponse)
-async def ask(request: AskRequest, http_request: Request):
+@app.post("/ask")
+async def ask(payload: dict[str, Any], http_request: Request) -> dict[str, Any]:
     flow_run_id = uuid4().hex[:12]
-    thread_id = request.thread_id or flow_run_id
+    thread_id = str(payload.get("thread_id") or flow_run_id)
+    context = payload.get("context")
+    if context is not None and not isinstance(context, dict):
+        raise HTTPException(status_code=422, detail="context must be an object")
+    inputs = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"thread_id", "context"}
+    }
     workflow = _get_workflow(http_request)
+    missing = [field for field in workflow.required_inputs() if field not in inputs]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Request body is missing required workflow inputs",
+                "required_inputs": list(workflow.required_inputs()),
+                "missing_inputs": missing,
+            },
+        )
     logger.info(
         "Request started | flow_run_id=%s | thread_id=%s",
         flow_run_id,
@@ -136,10 +145,10 @@ async def ask(request: AskRequest, http_request: Request):
 
     try:
         result = await workflow.akickoff(
-            {"user_input": request.user_input},
+            inputs,
             flow_run_id=flow_run_id,
             thread_id=thread_id,
-            context=request.context,
+            context=context or {},
         )
     except Exception as exc:
         logger.exception(
@@ -160,7 +169,7 @@ async def ask(request: AskRequest, http_request: Request):
     return _build_response(result, workflow=workflow, thread_id=thread_id)
 
 
-@app.post("/resume", response_model=AskResponse)
+@app.post("/resume")
 async def resume(request: ResumeRequest, http_request: Request):
     workflow = _get_workflow(http_request)
     try:
@@ -186,7 +195,7 @@ async def _run_cli_workflow(inputs: dict[str, Any]) -> State:
 
 def test() -> None:
     result = asyncio.run(_run_cli_workflow({"user_input": "Latest AI Agent Frameworks"}))
-    print(result.get("final_response", ""))
+    print(json.dumps(result, ensure_ascii=False, default=str))
 
 
 def run_with_trigger() -> None:

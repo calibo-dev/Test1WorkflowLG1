@@ -19,6 +19,8 @@ runtime infrastructure.
   and fallback configuration.
 - `src/latest_ai_development/config/tools.yaml` owns Python tool factories.
 - `src/latest_ai_development/config/mcp.yaml` owns MCP server transport settings.
+- `workflow.py` derives required request fields and public response fields from
+  `InputState` and `OutputState`; `/ask` accepts those fields dynamically.
 
 ## Stable Runtime Files
 
@@ -35,6 +37,11 @@ Do not modify these files for an ordinary workflow or agent addition:
 
 A change to these files requires a runtime capability that the current
 configuration contract cannot express.
+
+Do not generate per-workflow `AskRequest` or `AskResponse` models and do not
+hard-code `user_input` or `final_response` in these stable files. Extend
+`InputState` and `OutputState`; the reusable API/workflow boundary discovers
+their fields automatically.
 
 ## Adding An Agent
 
@@ -93,6 +100,12 @@ agents. Keep MCP server definitions in `config/mcp.yaml` and reference server
 names through an agent's `mcp_servers` list. The generic runtime resolves Python
 tools by graph node ID. Do not patch individual agent-node builders or the
 registry for each tool assignment.
+
+Tool assignment is many-to-many. An agent's `tools` list may contain multiple
+tool names, and the same tool name may appear in multiple agents. Define each
+unique tool factory once in `tools.yaml`; the registry caches one runtime
+instance per tool name and reuses it wherever assigned. Preserve tool-list order
+and remove duplicate names within an individual agent configuration.
 
 Use `factory_kwargs` only for non-secret constructor values such as table scope
 or feature flags. Keep credentials in environment variables or the secrets

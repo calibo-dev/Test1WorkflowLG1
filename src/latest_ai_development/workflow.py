@@ -11,7 +11,7 @@ from langgraph.types import Command
 from latest_ai_development.config.settings import get_graph_config, get_settings
 from latest_ai_development.graph.context import RuntimeContext
 from latest_ai_development.graph.graph_builder import GraphBuilder
-from latest_ai_development.graph.state import State
+from latest_ai_development.graph.state import InputState, OutputState, State
 from latest_ai_development.logging_utils import configure_logging, summarize_state_keys
 from latest_ai_development.tools.tool_registry import close_registered_tools
 from latest_ai_development.tracking import atrace_workflow_execution
@@ -46,6 +46,18 @@ class LatestAiDevelopmentWorkflow:
             logger.debug("Using cached LangGraph workflow")
         return self._graph
 
+    @staticmethod
+    def required_inputs() -> tuple[str, ...]:
+        """Return the public fields declared by the generated InputState."""
+        return tuple(InputState.__annotations__)
+
+    @staticmethod
+    def output_fields() -> tuple[str, ...]:
+        """Return generated public outputs, excluding the shared error channel."""
+        return tuple(
+            field for field in OutputState.__annotations__ if field != "errors"
+        )
+
     async def astart(self) -> None:
         """Compile all configured nodes and agents during application startup."""
         self.get_graph()
@@ -61,8 +73,28 @@ class LatestAiDevelopmentWorkflow:
                 await result
         await close_registered_tools()
 
-    def build_initial_state(self, *, user_input: str) -> State:
-        initial_state: State = {"user_input": user_input, "errors": []}
+    def build_initial_state(
+        self,
+        inputs: dict[str, Any] | None = None,
+        *,
+        user_input: str | None = None,
+    ) -> State:
+        """Build state from the generated public input contract.
+
+        ``user_input`` remains as a compatibility shim for the starter example;
+        generated workflows pass their complete input mapping.
+        """
+        values = dict(inputs or {})
+        if user_input is not None and "user_input" not in values:
+            values["user_input"] = user_input
+        missing = [field for field in self.required_inputs() if field not in values]
+        if missing:
+            raise ValueError(f"Missing required workflow inputs: {missing}")
+        initial_state = {
+            field: values[field]
+            for field in self.required_inputs()
+        }
+        initial_state["errors"] = []
         logger.debug(
             "Initial state prepared | state_keys=%s",
             summarize_state_keys(initial_state),
@@ -86,7 +118,6 @@ class LatestAiDevelopmentWorkflow:
         thread_id: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> State:
-        user_input = str(inputs.get("user_input", "") or "")
         flow_run_id = str(flow_run_id or inputs.get("flow_run_id") or uuid4().hex[:12]).strip()
         if not flow_run_id:
             flow_run_id = uuid4().hex[:12]
@@ -98,7 +129,7 @@ class LatestAiDevelopmentWorkflow:
             thread_id,
         )
 
-        initial_state = self.build_initial_state(user_input=user_input)
+        initial_state = self.build_initial_state(inputs)
         result = await self._ainvoke(
             initial_state,
             flow_run_id=flow_run_id,
@@ -147,10 +178,18 @@ class LatestAiDevelopmentWorkflow:
         )
 
     def _save_result(self, result: State, *, flow_run_id: str) -> None:
-        final_response = result.get(self.final_output_field, "")
-        if self.save_output and isinstance(final_response, str) and final_response.strip():
+        public_output = {
+            field: result.get(field)
+            for field in self.output_fields()
+        }
+        if self.save_output and any(value is not None for value in public_output.values()):
             try:
-                self.settings.report_output_path.write_text(final_response, encoding="utf-8")
+                import json
+
+                self.settings.report_output_path.write_text(
+                    json.dumps(public_output, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
                 logger.info(
                     "Report saved | flow_run_id=%s | output_path=%s",
                     flow_run_id,
