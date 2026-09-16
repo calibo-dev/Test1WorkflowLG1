@@ -39,8 +39,19 @@ def _get_agent_config(agent_id: str) -> dict[str, Any]:
     return agent_config
 
 
-def _load_prompt(prompt_reference: str) -> str:
-    prompt_path = Path(prompt_reference)
+def _load_prompt(prompt_value: str) -> str:
+    """Return an inline prompt, while retaining legacy prompt-file support."""
+    value = prompt_value.strip()
+    if not value:
+        raise ValueError("Agent prompt must not be empty")
+
+    looks_like_file = "\n" not in value and (
+        value.startswith("prompts/") or value.endswith((".md", ".txt"))
+    )
+    if not looks_like_file:
+        return value
+
+    prompt_path = Path(value)
     if not prompt_path.is_absolute():
         prompt_path = BASE_DIR / "src" / "latest_ai_development" / prompt_path
     if not prompt_path.is_file():

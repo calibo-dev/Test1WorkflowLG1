@@ -166,14 +166,22 @@ def _validate_agents_config() -> None:
         if not isinstance(model, str) or not model.strip():
             raise ValueError(f"Agent '{agent_id}' must define a model name")
 
-        prompt_reference = agent_config.get("prompt")
-        if not isinstance(prompt_reference, str) or not prompt_reference.strip():
-            raise ValueError(f"Agent '{agent_id}' must define a prompt file")
-        prompt_path = Path(prompt_reference)
-        if not prompt_path.is_absolute():
-            prompt_path = BASE_DIR / "src" / "latest_ai_development" / prompt_path
-        if not prompt_path.is_file():
-            raise ValueError(f"Agent '{agent_id}' prompt file does not exist: {prompt_path}")
+        prompt_value = agent_config.get("prompt")
+        if not isinstance(prompt_value, str) or not prompt_value.strip():
+            raise ValueError(f"Agent '{agent_id}' must define a non-empty prompt")
+        normalized_prompt = prompt_value.strip()
+        looks_like_file = "\n" not in normalized_prompt and (
+            normalized_prompt.startswith("prompts/")
+            or normalized_prompt.endswith((".md", ".txt"))
+        )
+        if looks_like_file:
+            prompt_path = Path(normalized_prompt)
+            if not prompt_path.is_absolute():
+                prompt_path = BASE_DIR / "src" / "latest_ai_development" / prompt_path
+            if not prompt_path.is_file():
+                raise ValueError(
+                    f"Agent '{agent_id}' prompt file does not exist: {prompt_path}"
+                )
 
         reads_state = _require_string_list(
             agent_config.get("reads_state", []),
