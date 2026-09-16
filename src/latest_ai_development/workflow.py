@@ -11,7 +11,13 @@ from langgraph.types import Command
 from latest_ai_development.config.settings import get_graph_config, get_settings
 from latest_ai_development.graph.context import RuntimeContext
 from latest_ai_development.graph.graph_builder import GraphBuilder
-from latest_ai_development.graph.state import InputState, OutputState, State
+from latest_ai_development.graph.state import (
+    INPUT_FIELDS,
+    OUTPUT_FIELDS,
+    REQUIRED_INPUT_FIELDS,
+    State,
+    state_defaults,
+)
 from latest_ai_development.logging_utils import configure_logging, summarize_state_keys
 from latest_ai_development.tools.tool_registry import close_registered_tools
 from latest_ai_development.tracking import atrace_workflow_execution
@@ -48,15 +54,18 @@ class LatestAiDevelopmentWorkflow:
 
     @staticmethod
     def required_inputs() -> tuple[str, ...]:
-        """Return the public fields declared by the generated InputState."""
-        return tuple(InputState.__annotations__)
+        """Return required public inputs declared in graph_config.yaml."""
+        return REQUIRED_INPUT_FIELDS
+
+    @staticmethod
+    def input_fields() -> tuple[str, ...]:
+        """Return every accepted public input declared in graph_config.yaml."""
+        return INPUT_FIELDS
 
     @staticmethod
     def output_fields() -> tuple[str, ...]:
-        """Return generated public outputs, excluding the shared error channel."""
-        return tuple(
-            field for field in OutputState.__annotations__ if field != "errors"
-        )
+        """Return public outputs declared in graph_config.yaml."""
+        return OUTPUT_FIELDS
 
     async def astart(self) -> None:
         """Compile all configured nodes and agents during application startup."""
@@ -90,11 +99,14 @@ class LatestAiDevelopmentWorkflow:
         missing = [field for field in self.required_inputs() if field not in values]
         if missing:
             raise ValueError(f"Missing required workflow inputs: {missing}")
-        initial_state = {
-            field: values[field]
-            for field in self.required_inputs()
-        }
-        initial_state["errors"] = []
+        initial_state = state_defaults()
+        initial_state.update(
+            {
+                field: values[field]
+                for field in self.input_fields()
+                if field in values
+            }
+        )
         logger.debug(
             "Initial state prepared | state_keys=%s",
             summarize_state_keys(initial_state),

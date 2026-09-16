@@ -11,10 +11,12 @@ runtime infrastructure.
 - `src/latest_ai_development/config/agents.yaml` owns agent roles, prompts,
   concrete providers and model names, state reads/writes, output fields, and
   tool/MCP assignments.
-- `src/latest_ai_development/config/graph_config.yaml` owns nodes, entry/end
-  nodes, direct edges, conditional routes, tracing, and the final output field.
-- `src/latest_ai_development/graph/state.py` owns separate public input, internal
-  state, and public output contracts. Nodes return partial state updates only.
+- `src/latest_ai_development/config/graph_config.yaml` owns the input/internal/output
+  state contract, nodes, entry/end nodes, direct edges, conditional routes,
+  tracing, and the final output field.
+- `src/latest_ai_development/graph/state.py` is the stable schema factory that
+  constructs LangGraph state types from `graph_config.yaml`. Nodes return partial
+  state updates only.
 - `src/latest_ai_development/config/models.yaml` owns provider generation defaults
   and fallback configuration.
 - `src/latest_ai_development/config/tools.yaml` owns Python tool factories.
@@ -27,6 +29,7 @@ runtime infrastructure.
 Do not modify these files for an ordinary workflow or agent addition:
 
 - `src/latest_ai_development/graph/graph_builder.py`
+- `src/latest_ai_development/graph/state.py`
 - `src/latest_ai_development/nodes/agent_node_builder.py`
 - `src/latest_ai_development/tools/tool_registry.py`
 - `src/latest_ai_development/workflow.py`
@@ -39,17 +42,20 @@ A change to these files requires a runtime capability that the current
 configuration contract cannot express.
 
 Do not generate per-workflow `AskRequest` or `AskResponse` models and do not
-hard-code `user_input` or `final_response` in these stable files. Extend
-`InputState` and `OutputState`; the reusable API/workflow boundary discovers
-their fields automatically.
+hard-code `user_input` or `final_response` in these stable files. Update the
+`state.input`, `state.internal`, and `state.output` mappings in
+`graph_config.yaml`; the reusable API/workflow boundary discovers them
+automatically.
 
 ## Adding An Agent
 
 1. Add the agent to `config/agents.yaml`.
 2. Add an agent node to `config/graph_config.yaml`.
-3. Add the prompt file referenced by the agent.
+3. Put the complete prompt inline in the agent entry; legacy prompt-file
+   references remain supported when intentionally needed.
 4. Add direct or conditional transitions in `graph_config.yaml`.
-5. Extend `graph/state.py` only for new state fields.
+5. Declare agent input, internal, and output fields under `state` in
+   `graph_config.yaml`.
 
 Agent nodes must use `type: agent` and reference an existing agent ID. Do not
 create another node-builder class for standard LLM agents.

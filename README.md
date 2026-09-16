@@ -12,9 +12,11 @@ The template separates workflow configuration from stable runtime code:
   names, state access, outputs, and tool/MCP assignments.
 - `config/tools.yaml` defines ordinary Python tool factories.
 - `config/mcp.yaml` defines MCP server transports and connection metadata.
-- `config/graph_config.yaml` defines nodes, entry/end nodes, direct edges,
-  conditional routes, tracing, and the final output field.
-- `graph/state.py` defines the stable state envelope and sample-specific fields.
+- `config/graph_config.yaml` defines the input/internal/output state contract,
+  nodes, entry/end nodes, direct edges, conditional routes, tracing, and the
+  final output field.
+- `graph/state.py` is the stable factory that converts the configured state
+  contract into LangGraph `InputState`, `State`, and `OutputState` schemas.
 - `nodes/agent_node_builder.py` builds every configured agent through one runtime
   path.
 - `nodes/orchestration_node_builder.py` contains sample-specific deterministic
@@ -122,6 +124,30 @@ output_mapping:
 ```
 
 ## Graph Configuration
+
+Declare graph-wide state alongside the topology. Input `required` controls the
+public API requirement; internal/output defaults are copied into each new run.
+Reducers are restricted to the reusable `append`, `messages`, and `merge`
+implementations.
+
+```yaml
+state:
+  input:
+    user_input:
+      type: string
+      required: true
+  internal:
+    errors:
+      type: list
+      items: string
+      reducer: append
+      default: []
+    decision:
+      type: string
+  output:
+    final_response:
+      type: string
+```
 
 Agent nodes reference an entry from `agents.yaml`:
 
@@ -313,14 +339,14 @@ routing.
 For an ordinary agent addition, update only:
 
 1. `config/agents.yaml`.
-2. `config/graph_config.yaml`.
-3. A prompt file.
-4. `graph/state.py` only when the agent introduces new state fields.
+2. `config/graph_config.yaml`, including its `state` mappings.
+3. A prompt file only when legacy file-based prompts are intentionally used;
+   generated workflows normally keep prompts inline in `agents.yaml`.
 
 The generated workflow should pass `tests/test_template.py` unchanged. The suite
 derives its contract checks from configuration instead of hard-coding workflow
 agent names.
 
-Do not edit `graph/graph_builder.py`, `nodes/agent_node_builder.py`,
+Do not edit `graph/state.py`, `graph/graph_builder.py`, `nodes/agent_node_builder.py`,
 `tools/tool_registry.py`, `workflow.py`, `main.py`, model fallback, or tracking for
 ordinary generated workflows.

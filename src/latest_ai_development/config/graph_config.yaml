@@ -3,6 +3,48 @@ end_nodes:
   - finalize_output
 final_output_field: final_response
 
+state:
+  input:
+    user_input:
+      type: string
+      required: true
+  internal:
+    errors:
+      type: list
+      items: string
+      reducer: append
+      default: []
+    validation_status:
+      type: string
+    normalized_feedback:
+      type: string
+    sentiment:
+      type: string
+    confidence:
+      type: string
+    sentiment_reason:
+      type: string
+    urgency_score:
+      type: integer
+      default: 0
+    policy_risk_score:
+      type: integer
+      default: 0
+    draft_response:
+      type: string
+    policy_guidance:
+      type: string
+    human_decision:
+      type: string
+  output:
+    final_response:
+      type: string
+    errors:
+      type: list
+      items: string
+      reducer: append
+      default: []
+
 persistence:
   enabled: true
   backend: memory
