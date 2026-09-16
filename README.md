@@ -19,8 +19,8 @@ The template separates workflow configuration from stable runtime code:
   contract into LangGraph `InputState`, `State`, and `OutputState` schemas.
 - `nodes/agent_node_builder.py` builds every configured agent through one runtime
   path.
-- `nodes/orchestration_node_builder.py` contains sample-specific deterministic
-  nodes.
+- `nodes/workflow_nodes.py` contains direct deterministic functions plus the
+  allowlisted node and router registries.
 - `graph/graph_builder.py` compiles the configuration into a `StateGraph`.
 - `tools/tool_registry.py` resolves tools assigned to configured graph nodes.
 - `tests/test_template.py` verifies the reusable contract without naming sample
@@ -158,14 +158,58 @@ nodes:
     agent: sentiment_classifier
 ```
 
-Deterministic nodes reference a builder:
+Every deterministic node exposes its operation contract in configuration. Its
+node ID selects the direct Python callable from `NODE_REGISTRY`:
+
+```yaml
+nodes:
+  prepare_feedback:
+    type: deterministic
+    reads_state:
+      - user_input
+    writes_state:
+      - normalized_feedback
+      - validation_status
+      - errors
+    operation:
+      type: input_validation
+      description: Validate and normalize incoming customer feedback.
+      parameters:
+        required: true
+        min_length: 4
+```
+
+`operation.type`, `operation.description`, and `operation.parameters` are
+descriptive, requirement-derived metadata. They are available to validation and
+workflow UIs but are not executed by the graph runtime. This keeps one consistent
+implementation path for input validation, routing calculations, interrupts,
+custom algorithms, and every other deterministic node.
+
+For example, a scoring node uses the same shape:
 
 ```yaml
 nodes:
   evaluate_feedback:
     type: deterministic
-    builder: latest_ai_development.nodes.orchestration_node_builder:FeedbackOrchestrationNodeBuilder.build_evaluate_feedback
+    reads_state:
+      - normalized_feedback
+      - sentiment
+      - confidence
+    writes_state:
+      - urgency_score
+      - policy_risk_score
+    operation:
+      type: feedback_scoring
+      description: Calculate urgency and policy-risk scores.
+      parameters:
+        score_range:
+          minimum: 0
+          maximum: 100
 ```
+
+Configuration validation requires operation metadata and declared state fields
+for every deterministic node, plus an exact callable under the same node ID in
+`NODE_REGISTRY`. Each direct function returns a partial state update.
 
 Use direct edges for unconditional execution:
 
@@ -186,13 +230,13 @@ conditional_edges:
       invalid: finalize_output
 ```
 
-A conditional edge may use a custom `router` reference instead of
+A conditional edge may use a `ROUTER_REGISTRY` key instead of
 `decision_field` when routing cannot be expressed through one state field:
 
 ```yaml
 conditional_edges:
   - from: evaluate_feedback
-    router: latest_ai_development.nodes.orchestration_node_builder:route_after_evaluation
+    router: evaluate_feedback
     path_map:
       appreciation: appreciation_response
       clarification: clarification_response
@@ -200,9 +244,9 @@ conditional_edges:
       human_review: human_review
 ```
 
-The router is ordinary testable Python and may evaluate several state fields. Keep
-the destinations in YAML so topology remains visible to configuration validation
-and workflow UIs. A node must not mix direct and conditional outgoing edges.
+The registered router is ordinary testable Python and may evaluate several state
+fields. Keep destinations in YAML so topology remains visible to configuration
+validation and workflow UIs. A node must not mix outgoing mechanisms.
 
 Use `Command(update=..., goto=...)` when one node must atomically update state and
 choose its next node. Declare every possible destination on that node so graph
@@ -212,13 +256,21 @@ visualization and configuration validation still know the topology:
 nodes:
   approval_gate:
     type: deterministic
-    builder: latest_ai_development.nodes.approval:build_approval_gate
+    reads_state:
+      - approval_status
+    writes_state:
+      - approval_status
+    operation:
+      type: approval_gate
+      description: Route an approval decision atomically.
+      parameters: {}
     command_destinations:
       - approved_work
       - rejected_response
 ```
 
-The callable returned by the builder returns `Command(update={...}, goto=...)`.
+The `NODE_REGISTRY["approval_gate"]` callable returns
+`Command(update={...}, goto=...)`.
 Do not also give that source a direct or conditional outgoing route.
 
 Use `Send` only for dynamic fan-out, where the number of worker invocations is
@@ -227,12 +279,13 @@ known at runtime rather than design time:
 ```yaml
 conditional_edges:
   - from: plan_work
-    router: latest_ai_development.nodes.planning:dispatch_work
+    router: plan_work_dispatch
     send_destinations:
       - worker
 ```
 
-`dispatch_work(state)` returns one `Send("worker", worker_input)` per work item.
+`ROUTER_REGISTRY["plan_work_dispatch"]` points to `dispatch_work`, which returns
+one `Send("worker", worker_input)` per work item.
 The declared destinations are used for validation; the router's returned `Send`
 objects carry the per-worker inputs.
 

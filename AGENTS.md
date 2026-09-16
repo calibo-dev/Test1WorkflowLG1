@@ -67,9 +67,16 @@ consumed by conditional routing. Do not parse model-generated JSON manually.
 ## Deterministic Nodes
 
 Use deterministic nodes for input validation, normalization, routing-decision
-calculation, retry counters, policy gates, and final response shaping. Put
-workflow-specific deterministic behavior in a focused node module and reference
-its builder from `graph_config.yaml`.
+calculation, retry counters, policy gates, and final response shaping. Every
+deterministic node declares visible `operation` metadata plus exact `reads_state`
+and `writes_state` in `graph_config.yaml`.
+
+Implement every deterministic node as a direct function in `workflow_nodes.py`
+and register it under the exact graph node ID in `NODE_REGISTRY`. Register named
+routers in `ROUTER_REGISTRY`. The operation metadata describes intent and
+parameters for validation and UI display; it is never interpreted as executable
+Python. Do not put builder classes, factory methods, or Python import paths in
+graph YAML. Put all simple or complex behavior in the registered functions.
 
 Prompts describe outputs; graph configuration controls execution order.
 

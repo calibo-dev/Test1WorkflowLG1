@@ -53,7 +53,7 @@ for CrewAI and LangChain.
 | --- | --- | --- | --- |
 | CrewAI | `agents.yaml`, `tasks.yaml` | Kickoff and process configuration | `crew.py` |
 | LangChain | `config.yaml` | Workflow stages and transitions | `agents.py`, `workflow.py` |
-| LangGraph | `agents.yaml` | Direct and conditional edges in `graph_config.yaml` | Generic graph and node builders |
+| LangGraph | `agents.yaml` | Direct and conditional edges in `graph_config.yaml` | Generic graph builder and direct callable registries |
 
 LangGraph needs additional graph-specific configuration because it explicitly
 models state, deterministic nodes, conditional routing, retries, entry points,
@@ -67,10 +67,10 @@ new handwritten runtime plumbing for every generated workflow.
 | `config/agents.yaml` | Agent identity, role, prompt, provider, model, tool/MCP assignments, state reads, and state writes | Generated or updated |
 | `config/tools.yaml` | Python tool names and factory references | Generated or updated when tools change |
 | `config/mcp.yaml` | MCP server transports and connection metadata | Generated or updated when MCP servers change |
-| `config/graph_config.yaml` | Entry node, end nodes, deterministic nodes, agent nodes, direct edges, conditional routes, and tracing labels | Generated or updated |
-| `graph/state.py` | Typed public input, shared state, routing fields, errors, and final response | Updated only when required |
+| `config/graph_config.yaml` | State contract, entry/end nodes, deterministic operation metadata, agent nodes, direct edges, conditional routes, and tracing labels | Generated or updated |
+| `graph/state.py` | Stable factory for the configured public input, internal state, reducers, and public output | Template-owned and read-only to codegen |
 | `nodes/agent_node_builder.py` | Generic model creation, fallback middleware, tools, invocation, parsing, and logging | Template-owned and read-only to codegen |
-| `nodes/deterministic_nodes.py` | Workflow-specific validation, transformation, routing decisions, retry handling, and final formatting | Generated or updated |
+| `nodes/workflow_nodes.py` | Direct deterministic functions and exact `NODE_REGISTRY`/`ROUTER_REGISTRY` mappings | Generated or updated when required |
 | `graph/graph_builder.py` | Compile the configured `StateGraph`, nodes, direct edges, conditional edges, `START`, and `END` | Template-owned and read-only to codegen |
 | `tools/tool_registry.py` | Generic tool registration and lookup by node or agent ID | Template-owned and read-only to codegen |
 | `tools/<tool>.py` | Connector-specific tool implementation | Added only for assigned tools |
@@ -218,7 +218,8 @@ graph contract.
 Tool usage should be declared in `agents.yaml` or the node configuration. The
 runtime should resolve tools using one reusable hook such as
 `get_tools_for_node(node_id)`. A tool is an agent dependency, not a workflow
-transition, and should not require patching individual node builders.
+transition, and should not require patching agent-node construction or workflow
+registries.
 
 ## Expected Generated File Footprint
 
@@ -274,7 +275,9 @@ After the template exposes stable extension points, agent-orch should:
 2. Map design agents to `agents.yaml`.
 3. Map deterministic and agent nodes, direct edges, conditional edges, entry, and
    end nodes to `graph_config.yaml`.
-4. Generate prompt content and workflow-specific deterministic logic.
+4. Record deterministic operation type, description, parameters, reads, and
+   writes in graph configuration and implement every deterministic callable in
+   `workflow_nodes.py`.
 5. Write Python tool factories to `tools.yaml`, MCP server connections to
    `mcp.yaml`, and generate only assigned tool modules and connector helpers.
 6. Detect imported direct dependencies and update `pyproject.toml` and `uv.lock`

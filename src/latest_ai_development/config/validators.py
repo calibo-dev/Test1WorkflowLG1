@@ -18,6 +18,7 @@ from latest_ai_development.config.settings import (
 )
 from latest_ai_development.graph.state import InputState, OutputState, State
 from latest_ai_development.llm.model_settings import get_model_settings
+from latest_ai_development.nodes.workflow_nodes import NODE_REGISTRY, ROUTER_REGISTRY
 
 
 def _validate_provider_model_section(
@@ -286,6 +287,7 @@ def _validate_graph_config() -> None:
 
     command_sources: set[str] = set()
     command_destinations_by_source: dict[str, list[str]] = {}
+    deterministic_node_ids: set[str] = set()
     for node_id, node_config in nodes.items():
         if not isinstance(node_id, str) or not node_id.strip():
             raise ValueError("graph_config.yaml node ids must be non-empty strings")
@@ -300,10 +302,50 @@ def _validate_graph_config() -> None:
                     f"graph_config.yaml node '{node_id}' references unknown agent '{agent_id}'"
                 )
         elif node_type == "deterministic":
-            builder = node_config.get("builder")
-            if not isinstance(builder, str) or not builder.strip():
-                raise ValueError(f"Deterministic node '{node_id}' must define a builder reference")
-            _resolve_reference(builder)
+            deterministic_node_ids.add(str(node_id))
+            operation = node_config.get("operation")
+            if not isinstance(operation, Mapping):
+                raise ValueError(
+                    f"Deterministic node '{node_id}' must define operation metadata"
+                )
+            operation_type = operation.get("type")
+            if not isinstance(operation_type, str) or not operation_type.strip():
+                raise ValueError(
+                    f"Deterministic node '{node_id}' operation.type must be a non-empty string"
+                )
+            description = operation.get("description")
+            if description is not None and (
+                not isinstance(description, str) or not description.strip()
+            ):
+                raise ValueError(
+                    f"Deterministic node '{node_id}' operation.description must be a string"
+                )
+            parameters = operation.get("parameters", {})
+            if not isinstance(parameters, Mapping):
+                raise ValueError(
+                    f"Deterministic node '{node_id}' operation.parameters must be a mapping"
+                )
+            reads_state = _require_string_list(
+                node_config.get("reads_state", []),
+                field_name=f"Node '{node_id}' reads_state",
+            )
+            writes_state = _require_string_list(
+                node_config.get("writes_state", []),
+                field_name=f"Node '{node_id}' writes_state",
+            )
+            if not writes_state:
+                raise ValueError(f"Node '{node_id}' writes_state must not be empty")
+            state_fields = (
+                set(InputState.__annotations__)
+                | set(State.__annotations__)
+                | set(OutputState.__annotations__)
+            )
+            unknown_state_fields = (set(reads_state) | set(writes_state)) - state_fields
+            if unknown_state_fields:
+                raise ValueError(
+                    f"Node '{node_id}' references undefined state fields: "
+                    f"{sorted(unknown_state_fields)}"
+                )
         else:
             raise ValueError(
                 f"graph_config.yaml node '{node_id}' type must be agent or deterministic"
@@ -328,6 +370,18 @@ def _validate_graph_config() -> None:
                 )
             command_sources.add(str(node_id))
             command_destinations_by_source[str(node_id)] = destinations
+
+    registered_node_ids = set(NODE_REGISTRY)
+    if registered_node_ids != deterministic_node_ids:
+        raise ValueError(
+            "NODE_REGISTRY keys must exactly match configured deterministic nodes: "
+            f"expected={sorted(deterministic_node_ids)} actual={sorted(registered_node_ids)}"
+        )
+    non_callable_nodes = sorted(
+        node_id for node_id, node_callable in NODE_REGISTRY.items() if not callable(node_callable)
+    )
+    if non_callable_nodes:
+        raise TypeError(f"NODE_REGISTRY contains non-callable nodes: {non_callable_nodes}")
 
     adjacency: dict[str, set[str]] = defaultdict(set)
     reverse_adjacency: dict[str, set[str]] = defaultdict(set)
@@ -389,7 +443,11 @@ def _validate_graph_config() -> None:
                     f"Dynamic Send edge '{source}' references undefined nodes: "
                     f"{sorted(unknown_destinations)}"
                 )
-            _resolve_reference(str(router))
+            router_id = str(router)
+            if router_id not in ROUTER_REGISTRY or not callable(ROUTER_REGISTRY[router_id]):
+                raise ValueError(
+                    f"Dynamic Send edge '{source}' references unknown router '{router_id}'"
+                )
             for target in destinations:
                 adjacency[str(source)].add(target)
                 reverse_adjacency[target].add(str(source))
@@ -400,7 +458,11 @@ def _validate_graph_config() -> None:
                 f"Conditional edge '{source}' must define exactly one of router or decision_field"
             )
         if router:
-            _resolve_reference(str(router))
+            router_id = str(router)
+            if router_id not in ROUTER_REGISTRY or not callable(ROUTER_REGISTRY[router_id]):
+                raise ValueError(
+                    f"Conditional edge '{source}' references unknown router '{router_id}'"
+                )
         elif decision_field not in (set(InputState.__annotations__) | set(State.__annotations__)):
             raise ValueError(
                 f"Conditional edge '{source}' references undefined state field '{decision_field}'"
@@ -422,6 +484,17 @@ def _validate_graph_config() -> None:
         default_route = conditional_config.get("default_route")
         if default_route and default_route not in path_map:
             raise ValueError(f"Conditional edge '{source}' default_route must exist in path_map")
+
+    configured_router_ids = {
+        str(config.get("router"))
+        for config in graph_config.get("conditional_edges", [])
+        if isinstance(config, Mapping) and config.get("router")
+    }
+    if set(ROUTER_REGISTRY) != configured_router_ids:
+        raise ValueError(
+            "ROUTER_REGISTRY keys must exactly match configured routers: "
+            f"expected={sorted(configured_router_ids)} actual={sorted(ROUTER_REGISTRY)}"
+        )
 
     mixed_sources = (
         (direct_sources & conditional_sources)

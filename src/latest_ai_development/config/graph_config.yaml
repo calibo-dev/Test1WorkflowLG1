@@ -58,13 +58,37 @@ runtime_context:
 nodes:
   prepare_feedback:
     type: deterministic
-    builder: latest_ai_development.nodes.orchestration_node_builder:FeedbackOrchestrationNodeBuilder.build_prepare_feedback
+    reads_state:
+      - user_input
+    writes_state:
+      - normalized_feedback
+      - validation_status
+      - errors
+    operation:
+      type: input_validation
+      description: Validate and normalize incoming customer feedback.
+      parameters:
+        required: true
+        min_length: 4
   classify_sentiment:
     type: agent
     agent: sentiment_classifier
   evaluate_feedback:
     type: deterministic
-    builder: latest_ai_development.nodes.orchestration_node_builder:FeedbackOrchestrationNodeBuilder.build_evaluate_feedback
+    reads_state:
+      - normalized_feedback
+      - sentiment
+      - confidence
+    writes_state:
+      - urgency_score
+      - policy_risk_score
+    operation:
+      type: feedback_scoring
+      description: Calculate deterministic urgency and policy-risk scores.
+      parameters:
+        score_range:
+          minimum: 0
+          maximum: 100
   appreciation_response:
     type: agent
     agent: appreciation_responder
@@ -79,10 +103,30 @@ nodes:
     agent: policy_advisor
   human_review:
     type: deterministic
-    builder: latest_ai_development.nodes.orchestration_node_builder:FeedbackOrchestrationNodeBuilder.build_human_review
+    reads_state:
+      - normalized_feedback
+      - sentiment
+      - urgency_score
+      - policy_risk_score
+    writes_state:
+      - human_decision
+      - final_response
+    operation:
+      type: human_review_interrupt
+      description: Pause high-risk feedback for a human decision and response.
+      parameters:
+        resume_required: true
   finalize_output:
     type: deterministic
-    builder: latest_ai_development.nodes.orchestration_node_builder:FeedbackOrchestrationNodeBuilder.build_finalize_output
+    reads_state:
+      - errors
+      - final_response
+    writes_state:
+      - final_response
+    operation:
+      type: response_formatting
+      description: Produce the final public response from response or error state.
+      parameters: {}
 
 edges:
   - from: classify_sentiment
@@ -107,7 +151,7 @@ conditional_edges:
       valid: classify_sentiment
       invalid: finalize_output
   - from: evaluate_feedback
-    router: latest_ai_development.nodes.orchestration_node_builder:route_after_evaluation
+    router: evaluate_feedback
     path_map:
       appreciation: appreciation_response
       clarification: clarification_response

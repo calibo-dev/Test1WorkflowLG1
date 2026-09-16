@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from importlib import import_module
 from inspect import Parameter, signature
 from typing import Any, cast
 
@@ -15,6 +14,7 @@ from latest_ai_development.graph.context import RuntimeContext
 from latest_ai_development.graph.state import InputState, OutputState, State
 from latest_ai_development.logging_utils import summarize_state_delta, summarize_state_keys
 from latest_ai_development.nodes.agent_node_builder import AgentNodeBuilder
+from latest_ai_development.nodes.workflow_nodes import NODE_REGISTRY, ROUTER_REGISTRY
 from latest_ai_development.tracking import atrace_node_execution
 
 logger = logging.getLogger(__name__)
@@ -22,24 +22,7 @@ logger = logging.getLogger(__name__)
 
 class GraphBuilder:
     @staticmethod
-    def _resolve_reference(reference: str) -> Callable[..., Any]:
-        module_path, separator, attribute_path = reference.partition(":")
-        if not separator or not module_path or not attribute_path:
-            raise ValueError(
-                f"Callable reference '{reference}' must use '<module>:<attribute>' format"
-            )
-
-        resolved: Any = import_module(module_path)
-        for attribute_name in attribute_path.split("."):
-            resolved = getattr(resolved, attribute_name)
-
-        if not callable(resolved):
-            raise TypeError(f"Resolved reference '{reference}' is not callable")
-        return cast(Callable[..., Any], resolved)
-
-    @classmethod
     def _resolve_node_callable(
-        cls,
         node_id: str,
         node_config: Mapping[str, Any],
     ) -> Callable[..., Any]:
@@ -48,12 +31,19 @@ class GraphBuilder:
                 node_id=node_id,
                 agent_id=str(node_config["agent"]),
             )
+        try:
+            return NODE_REGISTRY[node_id]
+        except KeyError as exc:
+            raise ValueError(
+                f"Deterministic node '{node_id}' is absent from NODE_REGISTRY"
+            ) from exc
 
-        builder = cls._resolve_reference(str(node_config["builder"]))
-        node_callable = builder()
-        if not callable(node_callable):
-            raise TypeError(f"Builder '{node_config['builder']}' did not return a callable node")
-        return cast(Callable[..., Any], node_callable)
+    @staticmethod
+    def _resolve_router_callable(router_id: str) -> Callable[..., Any]:
+        try:
+            return ROUTER_REGISTRY[router_id]
+        except KeyError as exc:
+            raise ValueError(f"Router '{router_id}' is absent from ROUTER_REGISTRY") from exc
 
     @staticmethod
     def _as_state_mapping(value: Any) -> Mapping[str, Any] | None:
@@ -232,7 +222,7 @@ class GraphBuilder:
             source = str(conditional_config["from"])
             send_destinations = conditional_config.get("send_destinations")
             if send_destinations is not None:
-                router = cls._resolve_reference(str(conditional_config["router"]))
+                router = cls._resolve_router_callable(str(conditional_config["router"]))
                 workflow.add_conditional_edges(
                     source,
                     cast(Any, cls._wrap_router_callable(source, router)),
@@ -245,7 +235,7 @@ class GraphBuilder:
             }
             router_reference = conditional_config.get("router")
             if router_reference:
-                router = cls._resolve_reference(str(router_reference))
+                router = cls._resolve_router_callable(str(router_reference))
             else:
                 router = cls._build_state_router(
                     source,
