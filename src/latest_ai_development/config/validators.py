@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from collections.abc import Mapping, Sequence
 from importlib import import_module
+from inspect import signature
 from pathlib import Path
 from typing import Any
 
@@ -82,7 +83,7 @@ def _validate_tools_config() -> set[str]:
         factory = tool_config.get("factory")
         if not isinstance(factory, str) or not factory.strip():
             raise ValueError(f"Tool '{tool_name}' must define a factory reference")
-        _resolve_reference(factory)
+        resolved_factory = _resolve_reference(factory)
 
         description = tool_config.get("description")
         if description is not None and (
@@ -97,6 +98,13 @@ def _validate_tools_config() -> set[str]:
         factory_kwargs = tool_config.get("factory_kwargs", {})
         if not isinstance(factory_kwargs, Mapping):
             raise ValueError(f"Tool '{tool_name}' factory_kwargs must be a mapping")
+        try:
+            signature(resolved_factory).bind(**dict(factory_kwargs))
+        except TypeError as exc:
+            raise ValueError(
+                f"Tool '{tool_name}' factory_kwargs do not match factory "
+                f"'{factory}': {exc}"
+            ) from exc
 
         for field_name in ("tags", "usage_guidelines", "non_usage_guidelines"):
             if field_name in tool_config:
