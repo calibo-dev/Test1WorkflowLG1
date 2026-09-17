@@ -8,7 +8,8 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from latest_ai_development.config.settings import get_settings
@@ -105,16 +106,17 @@ async def ask(request: AskRequest):
 
     try:
         result = workflow.kickoff({"topic": request.topic}, flow_run_id=flow_run_id)
-    except Exception as exc:
+    except Exception:
         logger.exception(
             "Request failed | flow_run_id=%s | topic=%s",
             flow_run_id,
             request.topic,
         )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Workflow execution failed. flow_run_id={flow_run_id}",
-        ) from exc
+        content = {
+            "status": "error",
+            "response": "Something went wrong. Please contact your administrator.",
+        }
+        return JSONResponse(status_code=500, content=content)
 
     logger.info(
         "Request completed | flow_run_id=%s | topic=%s",
