@@ -6,15 +6,15 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any
+from typing import Any, NotRequired, Required, get_args, get_origin, get_type_hints
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from latest_ai_development.config.settings import get_settings
 from latest_ai_development.config.validators import validate_configuration
-from latest_ai_development.graph.state import State
+from latest_ai_development.graph.state import InputState, OutputState, State
 from latest_ai_development.logging_utils import configure_logging
 from latest_ai_development.tracking import initialize_langsmith_tracing
 from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
@@ -79,6 +79,64 @@ class ResumeRequest(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+def _model_annotation(annotation: Any) -> Any:
+    """Remove TypedDict presence markers before creating a Pydantic field."""
+    if get_origin(annotation) in {Required, NotRequired}:
+        return get_args(annotation)[0]
+    return annotation
+
+
+def _build_api_model(
+    name: str,
+    state_type: type,
+    *,
+    required_fields: set[str],
+    envelope_fields: dict[str, tuple[Any, Any]],
+) -> type[BaseModel]:
+    """Build an OpenAPI-visible model from the generated state contract."""
+    # Pydantic accepts ``(annotation, default)`` field definitions dynamically.
+    # Keep the mapping value typed as Any so static analyzers do not interpret
+    # Pydantic's ``tuple[str, Any]`` overload as requiring string annotations.
+    fields: dict[str, Any] = {
+        field_name: (
+            _model_annotation(annotation),
+            ... if field_name in required_fields else None,
+        )
+        for field_name, annotation in get_type_hints(
+            state_type,
+            include_extras=True,
+        ).items()
+    }
+    fields.update(envelope_fields)
+    return create_model(
+        name,
+        __config__=ConfigDict(extra="ignore"),
+        **fields,
+    )
+
+
+AskRequest = _build_api_model(
+    "AskRequest",
+    InputState,
+    required_fields=set(InputState.__required_keys__),
+    envelope_fields={
+        "thread_id": (str | None, None),
+        "context": (dict[str, Any], Field(default_factory=dict)),
+    },
+)
+
+AskResponse = _build_api_model(
+    "AskResponse",
+    OutputState,
+    required_fields=set(),
+    envelope_fields={
+        "thread_id": (str, ...),
+        "status": (str, ...),
+        "interrupts": (list[Any], Field(default_factory=list)),
+    },
+)
+
+
 def _get_workflow(request: Request) -> LatestAiDevelopmentWorkflow:
     workflow = getattr(request.app.state, "workflow", None)
     if not isinstance(workflow, LatestAiDevelopmentWorkflow):
@@ -95,8 +153,9 @@ def _build_response(
     raw_interrupts = result.get("__interrupt__", [])  # type: ignore[typeddict-item]
     interrupts = [getattr(item, "value", item) for item in raw_interrupts]
     response = {
-        field: result.get(field)
+        field: result[field]
         for field in workflow.output_fields()
+        if field in result
     }
     response.update(
         thread_id=thread_id,
@@ -114,16 +173,14 @@ async def health() -> dict[str, Any]:
     }
 
 
-@app.post("/ask")
-async def ask(payload: dict[str, Any], http_request: Request) -> dict[str, Any]:
+async def ask(payload: BaseModel, http_request: Request) -> dict[str, Any]:
+    payload_values = payload.model_dump(exclude_unset=True)
     flow_run_id = uuid4().hex[:12]
-    thread_id = str(payload.get("thread_id") or flow_run_id)
-    context = payload.get("context")
-    if context is not None and not isinstance(context, dict):
-        raise HTTPException(status_code=422, detail="context must be an object")
+    thread_id = str(payload_values.get("thread_id") or flow_run_id)
+    context = payload_values.get("context") or {}
     inputs = {
         key: value
-        for key, value in payload.items()
+        for key, value in payload_values.items()
         if key not in {"thread_id", "context"}
     }
     workflow = _get_workflow(http_request)
@@ -169,7 +226,11 @@ async def ask(payload: dict[str, Any], http_request: Request) -> dict[str, Any]:
     return _build_response(result, workflow=workflow, thread_id=thread_id)
 
 
-@app.post("/resume")
+ask.__annotations__["payload"] = AskRequest
+app.post("/ask", response_model=AskResponse)(ask)
+
+
+@app.post("/resume", response_model=AskResponse)
 async def resume(request: ResumeRequest, http_request: Request):
     workflow = _get_workflow(http_request)
     try:
