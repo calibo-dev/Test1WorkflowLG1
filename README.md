@@ -12,11 +12,10 @@ The template separates workflow configuration from stable runtime code:
   names, state access, outputs, and tool/MCP assignments.
 - `config/tools.yaml` defines ordinary Python tool factories.
 - `config/mcp.yaml` defines MCP server transports and connection metadata.
-- `config/graph_config.yaml` defines the input/internal/output state contract,
-  nodes, entry/end nodes, direct edges, conditional routes, tracing, and the
-  final output field.
-- `graph/state.py` is the stable factory that converts the configured state
-  contract into LangGraph `InputState`, `State`, and `OutputState` schemas.
+- `config/graph_config.yaml` defines nodes, entry/end nodes, direct edges,
+  conditional routes, tracing, and the final output field.
+- `graph/state.py` explicitly declares LangGraph `InputState`, `State`, and
+  `OutputState` schemas, reducers, required inputs, and defaults.
 - `nodes/agent_node_builder.py` builds every configured agent through one runtime
   path.
 - `nodes/workflow_nodes.py` contains direct deterministic functions plus the
@@ -125,61 +124,57 @@ output_mapping:
 
 ## Graph Configuration
 
-Declare graph-wide state alongside the topology. Input `required` controls the
-public API requirement; internal/output defaults are copied into each new run.
-Reducers are restricted to the reusable `append`, `messages`, and `merge`
-implementations.
+Declare graph-wide state explicitly in `graph/state.py`. `Required` controls the
+public API requirement, `Annotated` attaches reducers, and `state_defaults()`
+provides isolated defaults for each run.
 
-```yaml
-state:
-  input:
-    user_input:
-      type: string
-      required: true
-  internal:
-    errors:
-      type: list
-      items: string
-      reducer: append
-      default: []
-    decision:
-      type: string
-  output:
-    final_response:
-      type: string
+```python
+class InputState(TypedDict, total=False):
+    user_input: Required[str]
+
+class OutputState(TypedDict, total=False):
+    final_response: str
+
+class State(TypedDict, total=False):
+    user_input: str
+    errors: Annotated[list[str], add]
+    decision: str
+    final_response: str
 ```
 
 Agent nodes reference an entry from `agents.yaml`:
 
 ```yaml
-nodes:
-  classify_sentiment:
-    type: agent
-    agent: sentiment_classifier
+graph:
+  nodes:
+    - node_id: classify_sentiment
+      node_type: agent
+      agent_name: sentiment_classifier
 ```
 
 Every deterministic node exposes its operation contract in configuration. Its
 node ID selects the direct Python callable from `NODE_REGISTRY`:
 
 ```yaml
-nodes:
-  prepare_feedback:
-    type: deterministic
-    reads_state:
-      - user_input
-    writes_state:
-      - normalized_feedback
-      - validation_status
-      - errors
-    operation:
-      type: input_validation
+graph:
+  nodes:
+    - node_id: prepare_feedback
+      node_type: deterministic
+      operation_type: input_validation
       description: Validate and normalize incoming customer feedback.
-      parameters:
-        required: true
-        min_length: 4
+      reads_state:
+        - user_input
+      writes_state:
+        - normalized_feedback
+        - validation_status
+        - errors
+      metadata:
+        parameters:
+          required: true
+          min_length: 4
 ```
 
-`operation.type`, `operation.description`, and `operation.parameters` are
+`operation_type`, `description`, and `metadata.parameters` are
 descriptive, requirement-derived metadata. They are available to validation and
 workflow UIs but are not executed by the graph runtime. This keeps one consistent
 implementation path for input validation, routing calculations, interrupts,
@@ -188,23 +183,24 @@ custom algorithms, and every other deterministic node.
 For example, a scoring node uses the same shape:
 
 ```yaml
-nodes:
-  evaluate_feedback:
-    type: deterministic
-    reads_state:
-      - normalized_feedback
-      - sentiment
-      - confidence
-    writes_state:
-      - urgency_score
-      - policy_risk_score
-    operation:
-      type: feedback_scoring
+graph:
+  nodes:
+    - node_id: evaluate_feedback
+      node_type: deterministic
+      operation_type: feedback_scoring
       description: Calculate urgency and policy-risk scores.
-      parameters:
-        score_range:
-          minimum: 0
-          maximum: 100
+      reads_state:
+        - normalized_feedback
+        - sentiment
+        - confidence
+      writes_state:
+        - urgency_score
+        - policy_risk_score
+      metadata:
+        parameters:
+          score_range:
+            minimum: 0
+            maximum: 100
 ```
 
 Configuration validation requires operation metadata and declared state fields
@@ -214,34 +210,39 @@ for every deterministic node, plus an exact callable under the same node ID in
 Use direct edges for unconditional execution:
 
 ```yaml
-edges:
-  - from: service_recovery_response
-    to: policy_guidance
+graph:
+  edges:
+    - source: service_recovery_response
+      target: policy_guidance
 ```
 
 Use a state field and path map for ordinary conditional routing:
 
 ```yaml
-conditional_edges:
-  - from: prepare_feedback
-    decision_field: validation_status
-    path_map:
-      valid: classify_sentiment
-      invalid: finalize_output
+graph:
+  conditional_edges:
+    - source: prepare_feedback
+      decision_field: validation_status
+      routes:
+        - route_key: valid
+          target: classify_sentiment
+        - route_key: invalid
+          target: finalize_output
 ```
 
 A conditional edge may use a `ROUTER_REGISTRY` key instead of
 `decision_field` when routing cannot be expressed through one state field:
 
 ```yaml
-conditional_edges:
-  - from: evaluate_feedback
-    router: evaluate_feedback
-    path_map:
-      appreciation: appreciation_response
-      clarification: clarification_response
-      service_recovery: service_recovery_response
-      human_review: human_review
+graph:
+  conditional_edges:
+    - source: evaluate_feedback
+      router: evaluate_feedback
+      routes:
+        - {route_key: appreciation, target: appreciation_response}
+        - {route_key: clarification, target: clarification_response}
+        - {route_key: service_recovery, target: service_recovery_response}
+        - {route_key: human_review, target: human_review}
 ```
 
 The registered router is ordinary testable Python and may evaluate several state
@@ -253,20 +254,20 @@ choose its next node. Declare every possible destination on that node so graph
 visualization and configuration validation still know the topology:
 
 ```yaml
-nodes:
-  approval_gate:
-    type: deterministic
-    reads_state:
-      - approval_status
-    writes_state:
-      - approval_status
-    operation:
-      type: approval_gate
+graph:
+  nodes:
+    - node_id: approval_gate
+      node_type: deterministic
+      operation_type: approval_gate
       description: Route an approval decision atomically.
-      parameters: {}
-    command_destinations:
-      - approved_work
-      - rejected_response
+      reads_state:
+        - approval_status
+      writes_state:
+        - approval_status
+      command_destinations:
+        - approved_work
+        - rejected_response
+      metadata: {}
 ```
 
 The `NODE_REGISTRY["approval_gate"]` callable returns
@@ -277,11 +278,12 @@ Use `Send` only for dynamic fan-out, where the number of worker invocations is
 known at runtime rather than design time:
 
 ```yaml
-conditional_edges:
-  - from: plan_work
-    router: plan_work_dispatch
-    send_destinations:
-      - worker
+graph:
+  conditional_edges:
+    - source: plan_work
+      router: plan_work_dispatch
+      send_destinations:
+        - worker
 ```
 
 `ROUTER_REGISTRY["plan_work_dispatch"]` points to `dispatch_work`, which returns
@@ -392,14 +394,15 @@ routing.
 For an ordinary agent addition, update only:
 
 1. `config/agents.yaml`.
-2. `config/graph_config.yaml`, including its `state` mappings.
-3. A prompt file only when legacy file-based prompts are intentionally used;
+2. `config/graph_config.yaml`.
+3. `graph/state.py` with the explicit typed workflow state.
+4. A prompt file only when legacy file-based prompts are intentionally used;
    generated workflows normally keep prompts inline in `agents.yaml`.
 
 The generated workflow should pass `tests/test_template.py` unchanged. The suite
 derives its contract checks from configuration instead of hard-coding workflow
 agent names.
 
-Do not edit `graph/state.py`, `graph/graph_builder.py`, `nodes/agent_node_builder.py`,
+Do not edit `graph/graph_builder.py`, `nodes/agent_node_builder.py`,
 `tools/tool_registry.py`, `workflow.py`, `main.py`, model fallback, or tracking for
 ordinary generated workflows.

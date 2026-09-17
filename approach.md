@@ -67,8 +67,8 @@ new handwritten runtime plumbing for every generated workflow.
 | `config/agents.yaml` | Agent identity, role, prompt, provider, model, tool/MCP assignments, state reads, and state writes | Generated or updated |
 | `config/tools.yaml` | Python tool names and factory references | Generated or updated when tools change |
 | `config/mcp.yaml` | MCP server transports and connection metadata | Generated or updated when MCP servers change |
-| `config/graph_config.yaml` | State contract, entry/end nodes, deterministic operation metadata, agent nodes, direct edges, conditional routes, and tracing labels | Generated or updated |
-| `graph/state.py` | Stable factory for the configured public input, internal state, reducers, and public output | Template-owned and read-only to codegen |
+| `config/graph_config.yaml` | Entry/end nodes, deterministic operation metadata, agent nodes, direct edges, conditional routes, and tracing labels | Generated or updated |
+| `graph/state.py` | Explicit typed public input, internal state, reducers, defaults, and public output | Generated or updated |
 | `nodes/agent_node_builder.py` | Generic model creation, fallback middleware, tools, invocation, parsing, and logging | Template-owned and read-only to codegen |
 | `nodes/workflow_nodes.py` | Direct deterministic functions and exact `NODE_REGISTRY`/`ROUTER_REGISTRY` mappings | Generated or updated when required |
 | `graph/graph_builder.py` | Compile the configured `StateGraph`, nodes, direct edges, conditional edges, `START`, and `END` | Template-owned and read-only to codegen |
@@ -124,60 +124,69 @@ fallback setup code.
 ### Graph configuration
 
 ```yaml
-entry_point: validate_input
-end_nodes:
-  - format_response
-
-nodes:
-  validate_input:
-    type: deterministic
-    callable: deterministic_nodes:validate_input
-
-  sentiment_analyzer:
-    type: agent
-    agent: sentiment_analyzer
-
-  route_sentiment:
-    type: deterministic
-    callable: deterministic_nodes:route_sentiment
-
-  positive_response:
-    type: deterministic
-    callable: deterministic_nodes:positive_response
-
-  support_response:
-    type: agent
-    agent: support_response_agent
-
-  clarification:
-    type: agent
-    agent: clarification_agent
-
-  format_response:
-    type: deterministic
-    callable: deterministic_nodes:format_response
-
-edges:
-  - from: validate_input
-    to: sentiment_analyzer
-  - from: sentiment_analyzer
-    to: route_sentiment
-  - from: positive_response
-    to: format_response
-  - from: support_response
-    to: format_response
-
-conditional_edges:
-  - from: route_sentiment
-    decision_field: sentiment
-    path_map:
-      positive: positive_response
-      negative: support_response
-      unclear: clarification
+graph:
+  entry_node: validate_input
+  end_nodes:
+    - format_response
+  final_output_field: response
+  nodes:
+    - node_id: validate_input
+      node_type: deterministic
+      operation_type: input_validation
+      reads_state: [request]
+      writes_state: [validation_route]
+    - node_id: sentiment_analyzer
+      node_type: agent
+      agent_name: sentiment_analyzer
+      reads_state: [request]
+      writes_state: [sentiment]
+    - node_id: route_sentiment
+      node_type: deterministic
+      operation_type: routing
+      reads_state: [sentiment]
+      writes_state: [sentiment_route]
+    - node_id: positive_response
+      node_type: deterministic
+      operation_type: response_generation
+      reads_state: [request]
+      writes_state: [response]
+    - node_id: support_response
+      node_type: agent
+      agent_name: support_response_agent
+      reads_state: [request, sentiment]
+      writes_state: [response]
+    - node_id: clarification
+      node_type: agent
+      agent_name: clarification_agent
+      reads_state: [request]
+      writes_state: [response]
+    - node_id: format_response
+      node_type: deterministic
+      operation_type: formatting
+      reads_state: [response]
+      writes_state: [response]
+  edges:
+    - source: validate_input
+      target: sentiment_analyzer
+    - source: sentiment_analyzer
+      target: route_sentiment
+    - source: positive_response
+      target: format_response
+    - source: support_response
+      target: format_response
+    - source: clarification
+      target: format_response
+  conditional_edges:
+    - source: route_sentiment
+      decision_field: sentiment_route
+      routes:
+        - {route_key: positive, target: positive_response}
+        - {route_key: negative, target: support_response}
+        - {route_key: unclear, target: clarification}
 ```
 
 The graph builder should implement `decision_field` routing generically by
-reading the configured field from state and resolving it through `path_map`.
+reading the configured field from state and resolving it through `routes`.
 Custom router callables should remain available only for routing that cannot be
 expressed through a state field.
 
@@ -228,7 +237,7 @@ registries.
 | Category | Expected count |
 | --- | ---: |
 | Core configuration | 2 |
-| State contract | 0-1 |
+| Typed `state.py` contract | 1 |
 | Deterministic workflow logic | 1 |
 | Tool implementations and connector helper | 2-3 |
 | Dependency files | 0 or 2 |
@@ -241,9 +250,8 @@ registries.
 | --- | ---: |
 | `agents.yaml` | 1 |
 | `graph_config.yaml` | 1 |
-| Agent prompt | 1 |
-| State extension, when needed | 0-1 |
-| Total | Approximately 3-4 |
+| Typed `state.py`, when fields change | 0-1 |
+| Total | Approximately 2-3 |
 
 Connector files, the tool registry, dependency manifests, API code, workflow
 bootstrap, model fallback, tracking, and broad tests should not change for a

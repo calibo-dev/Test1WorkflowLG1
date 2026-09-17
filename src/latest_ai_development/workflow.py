@@ -54,17 +54,17 @@ class LatestAiDevelopmentWorkflow:
 
     @staticmethod
     def required_inputs() -> tuple[str, ...]:
-        """Return required public inputs declared in graph_config.yaml."""
+        """Return required public inputs declared by InputState."""
         return REQUIRED_INPUT_FIELDS
 
     @staticmethod
     def input_fields() -> tuple[str, ...]:
-        """Return every accepted public input declared in graph_config.yaml."""
+        """Return every accepted public input declared by InputState."""
         return INPUT_FIELDS
 
     @staticmethod
     def output_fields() -> tuple[str, ...]:
-        """Return public outputs declared in graph_config.yaml."""
+        """Return public outputs declared by OutputState."""
         return OUTPUT_FIELDS
 
     async def astart(self) -> None:

@@ -301,6 +301,20 @@ def _validate_graph_config() -> None:
                 raise ValueError(
                     f"graph_config.yaml node '{node_id}' references unknown agent '{agent_id}'"
                 )
+            for field_name in ("reads_state", "writes_state"):
+                node_values = _require_string_list(
+                    node_config.get(field_name, []),
+                    field_name=f"Node '{node_id}' {field_name}",
+                )
+                agent_values = _require_string_list(
+                    agents[agent_id].get(field_name, []),
+                    field_name=f"Agent '{agent_id}' {field_name}",
+                )
+                if node_values != agent_values:
+                    raise ValueError(
+                        f"Agent node '{node_id}' {field_name} must match agent "
+                        f"'{agent_id}': expected={agent_values} actual={node_values}"
+                    )
         elif node_type == "deterministic":
             deterministic_node_ids.add(str(node_id))
             operation = node_config.get("operation")

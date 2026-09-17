@@ -11,11 +11,10 @@ runtime infrastructure.
 - `src/latest_ai_development/config/agents.yaml` owns agent roles, prompts,
   concrete providers and model names, state reads/writes, output fields, and
   tool/MCP assignments.
-- `src/latest_ai_development/config/graph_config.yaml` owns the input/internal/output
-  state contract, nodes, entry/end nodes, direct edges, conditional routes,
-  tracing, and the final output field.
-- `src/latest_ai_development/graph/state.py` is the stable schema factory that
-  constructs LangGraph state types from `graph_config.yaml`. Nodes return partial
+- `src/latest_ai_development/config/graph_config.yaml` owns nodes, entry/end nodes,
+  direct edges, conditional routes, tracing, and the final output field.
+- `src/latest_ai_development/graph/state.py` explicitly declares `InputState`,
+  complete `State`, `OutputState`, reducers, and defaults. Nodes return partial
   state updates only.
 - `src/latest_ai_development/config/models.yaml` owns provider generation defaults
   and fallback configuration.
@@ -29,7 +28,6 @@ runtime infrastructure.
 Do not modify these files for an ordinary workflow or agent addition:
 
 - `src/latest_ai_development/graph/graph_builder.py`
-- `src/latest_ai_development/graph/state.py`
 - `src/latest_ai_development/nodes/agent_node_builder.py`
 - `src/latest_ai_development/tools/tool_registry.py`
 - `src/latest_ai_development/workflow.py`
@@ -42,10 +40,9 @@ A change to these files requires a runtime capability that the current
 configuration contract cannot express.
 
 Do not generate per-workflow `AskRequest` or `AskResponse` models and do not
-hard-code `user_input` or `final_response` in these stable files. Update the
-`state.input`, `state.internal`, and `state.output` mappings in
-`graph_config.yaml`; the reusable API/workflow boundary discovers them
-automatically.
+hard-code `user_input` or `final_response` in the stable runtime files. Update
+the explicit typed classes and exported field constants in `graph/state.py`;
+the reusable API/workflow boundary discovers them automatically.
 
 ## Adding An Agent
 
@@ -54,10 +51,11 @@ automatically.
 3. Put the complete prompt inline in the agent entry; legacy prompt-file
    references remain supported when intentionally needed.
 4. Add direct or conditional transitions in `graph_config.yaml`.
-5. Declare agent input, internal, and output fields under `state` in
-   `graph_config.yaml`.
+5. Declare agent input, internal, and output fields in the typed state classes
+   in `graph/state.py`.
 
-Agent nodes must use `type: agent` and reference an existing agent ID. Do not
+Agent nodes must use `node_type: agent` and reference an existing agent ID with
+`agent_name` (or `agent_id` when its display name differs). Do not
 create another node-builder class for standard LLM agents.
 
 Use `output_field` for a single text result. Use `output_mapping` when a generated
@@ -68,8 +66,9 @@ consumed by conditional routing. Do not parse model-generated JSON manually.
 
 Use deterministic nodes for input validation, normalization, routing-decision
 calculation, retry counters, policy gates, and final response shaping. Every
-deterministic node declares visible `operation` metadata plus exact `reads_state`
-and `writes_state` in `graph_config.yaml`.
+deterministic node declares visible `operation_type`, `description`, and
+`metadata.parameters` plus exact `reads_state` and `writes_state` in
+`graph_config.yaml`.
 
 Implement every deterministic node as a direct function in `workflow_nodes.py`
 and register it under the exact graph node ID in `NODE_REGISTRY`. Register named

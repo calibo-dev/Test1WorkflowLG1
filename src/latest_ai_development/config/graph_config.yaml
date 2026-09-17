@@ -1,49 +1,192 @@
-entry_point: prepare_feedback
-end_nodes:
-  - finalize_output
-final_output_field: final_response
+graph:
+  graph_id: customer_feedback_response_workflow
+  description: Validate, classify, route, and respond to customer feedback.
+  entry_node: prepare_feedback
+  end_nodes:
+    - finalize_output
+  final_output_field: final_response
 
-state:
-  input:
-    user_input:
-      type: string
-      required: true
-  internal:
-    errors:
-      type: list
-      items: string
-      reducer: append
-      default: []
-    validation_status:
-      type: string
-    normalized_feedback:
-      type: string
-    sentiment:
-      type: string
-    confidence:
-      type: string
-    sentiment_reason:
-      type: string
-    urgency_score:
-      type: integer
-      default: 0
-    policy_risk_score:
-      type: integer
-      default: 0
-    draft_response:
-      type: string
-    policy_guidance:
-      type: string
-    human_decision:
-      type: string
-  output:
-    final_response:
-      type: string
-    errors:
-      type: list
-      items: string
-      reducer: append
-      default: []
+  nodes:
+    - node_id: prepare_feedback
+      node_type: deterministic
+      agent_name: null
+      operation_type: input_validation
+      description: Validate and normalize incoming customer feedback.
+      reads_state:
+        - user_input
+      writes_state:
+        - normalized_feedback
+        - validation_status
+        - errors
+      metadata:
+        parameters:
+          required: true
+          min_length: 4
+
+    - node_id: classify_sentiment
+      node_type: agent
+      agent_name: sentiment_classifier
+      operation_type: null
+      description: Classify feedback sentiment and confidence.
+      reads_state:
+        - normalized_feedback
+      writes_state:
+        - sentiment
+        - confidence
+        - sentiment_reason
+      metadata: {}
+
+    - node_id: evaluate_feedback
+      node_type: deterministic
+      agent_name: null
+      operation_type: feedback_scoring
+      description: Calculate deterministic urgency and policy-risk scores.
+      reads_state:
+        - normalized_feedback
+        - sentiment
+        - confidence
+      writes_state:
+        - urgency_score
+        - policy_risk_score
+      metadata:
+        parameters:
+          score_range:
+            minimum: 0
+            maximum: 100
+
+    - node_id: appreciation_response
+      node_type: agent
+      agent_name: appreciation_responder
+      operation_type: null
+      description: Produce an appreciation response.
+      reads_state:
+        - normalized_feedback
+        - sentiment_reason
+      writes_state:
+        - final_response
+      metadata: {}
+
+    - node_id: clarification_response
+      node_type: agent
+      agent_name: clarification_responder
+      operation_type: null
+      description: Ask the customer for clarification.
+      reads_state:
+        - normalized_feedback
+        - sentiment
+        - confidence
+      writes_state:
+        - final_response
+      metadata: {}
+
+    - node_id: service_recovery_response
+      node_type: agent
+      agent_name: service_recovery_responder
+      operation_type: null
+      description: Draft an empathetic service-recovery response.
+      reads_state:
+        - normalized_feedback
+        - sentiment_reason
+        - urgency_score
+      writes_state:
+        - draft_response
+      metadata: {}
+
+    - node_id: policy_guidance
+      node_type: agent
+      agent_name: policy_advisor
+      operation_type: null
+      description: Apply policy guidance to the response.
+      reads_state:
+        - normalized_feedback
+        - draft_response
+        - policy_risk_score
+      writes_state:
+        - policy_guidance
+        - final_response
+      metadata: {}
+
+    - node_id: human_review
+      node_type: deterministic
+      agent_name: null
+      operation_type: human_review_interrupt
+      description: Pause high-risk feedback for a human decision and response.
+      reads_state:
+        - normalized_feedback
+        - sentiment
+        - urgency_score
+        - policy_risk_score
+      writes_state:
+        - human_decision
+        - final_response
+      metadata:
+        parameters:
+          resume_required: true
+
+    - node_id: finalize_output
+      node_type: deterministic
+      agent_name: null
+      operation_type: response_formatting
+      description: Produce the final public response from response or error state.
+      reads_state:
+        - errors
+        - final_response
+      writes_state:
+        - final_response
+      metadata: {}
+
+  edges:
+    - source: classify_sentiment
+      target: evaluate_feedback
+      protocol: sync
+      description: Pass sentiment analysis to deterministic evaluation.
+    - source: appreciation_response
+      target: finalize_output
+      protocol: sync
+      description: Format the appreciation response.
+    - source: clarification_response
+      target: finalize_output
+      protocol: sync
+      description: Format the clarification response.
+    - source: service_recovery_response
+      target: policy_guidance
+      protocol: sync
+      description: Apply policy guidance to the recovery response.
+    - source: policy_guidance
+      target: finalize_output
+      protocol: sync
+      description: Format the policy-aware response.
+    - source: human_review
+      target: finalize_output
+      protocol: sync
+      description: Format the reviewed response.
+  conditional_edges:
+    - source: prepare_feedback
+      decision_field: validation_status
+      description: Route according to input validation.
+      routes:
+        - route_key: valid
+          target: classify_sentiment
+          description: Continue with valid feedback.
+        - route_key: invalid
+          target: finalize_output
+          description: Return the validation error.
+    - source: evaluate_feedback
+      router: evaluate_feedback
+      description: Route according to sentiment and risk scores.
+      routes:
+        - route_key: appreciation
+          target: appreciation_response
+          description: Generate an appreciation response.
+        - route_key: clarification
+          target: clarification_response
+          description: Ask for clarification.
+        - route_key: service_recovery
+          target: service_recovery_response
+          description: Start service recovery.
+        - route_key: human_review
+          target: human_review
+          description: Pause for human review.
 
 persistence:
   enabled: true
@@ -54,109 +197,6 @@ execution:
 
 runtime_context:
   defaults: {}
-
-nodes:
-  prepare_feedback:
-    type: deterministic
-    reads_state:
-      - user_input
-    writes_state:
-      - normalized_feedback
-      - validation_status
-      - errors
-    operation:
-      type: input_validation
-      description: Validate and normalize incoming customer feedback.
-      parameters:
-        required: true
-        min_length: 4
-  classify_sentiment:
-    type: agent
-    agent: sentiment_classifier
-  evaluate_feedback:
-    type: deterministic
-    reads_state:
-      - normalized_feedback
-      - sentiment
-      - confidence
-    writes_state:
-      - urgency_score
-      - policy_risk_score
-    operation:
-      type: feedback_scoring
-      description: Calculate deterministic urgency and policy-risk scores.
-      parameters:
-        score_range:
-          minimum: 0
-          maximum: 100
-  appreciation_response:
-    type: agent
-    agent: appreciation_responder
-  clarification_response:
-    type: agent
-    agent: clarification_responder
-  service_recovery_response:
-    type: agent
-    agent: service_recovery_responder
-  policy_guidance:
-    type: agent
-    agent: policy_advisor
-  human_review:
-    type: deterministic
-    reads_state:
-      - normalized_feedback
-      - sentiment
-      - urgency_score
-      - policy_risk_score
-    writes_state:
-      - human_decision
-      - final_response
-    operation:
-      type: human_review_interrupt
-      description: Pause high-risk feedback for a human decision and response.
-      parameters:
-        resume_required: true
-  finalize_output:
-    type: deterministic
-    reads_state:
-      - errors
-      - final_response
-    writes_state:
-      - final_response
-    operation:
-      type: response_formatting
-      description: Produce the final public response from response or error state.
-      parameters: {}
-
-edges:
-  - from: classify_sentiment
-    to: evaluate_feedback
-  - from: appreciation_response
-    to: finalize_output
-  - from: clarification_response
-    to: finalize_output
-  - from: service_recovery_response
-    to: policy_guidance
-  - from: policy_guidance
-    to: finalize_output
-  - from: human_review
-    to: finalize_output
-  - from: finalize_output
-    to: END
-
-conditional_edges:
-  - from: prepare_feedback
-    decision_field: validation_status
-    path_map:
-      valid: classify_sentiment
-      invalid: finalize_output
-  - from: evaluate_feedback
-    router: evaluate_feedback
-    path_map:
-      appreciation: appreciation_response
-      clarification: clarification_response
-      service_recovery: service_recovery_response
-      human_review: human_review
 
 tracing:
   workflow:

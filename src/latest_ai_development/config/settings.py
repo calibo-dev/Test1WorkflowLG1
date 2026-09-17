@@ -162,6 +162,107 @@ def load_yaml_file(path: Path) -> dict[str, Any]:
     return data
 
 
+def normalize_graph_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Translate the design-aligned YAML graph into the runtime representation."""
+    graph = config.get("graph")
+    if not isinstance(graph, dict):
+        return config
+
+    normalized = {key: value for key, value in config.items() if key != "graph"}
+    normalized.update(
+        {
+            "graph_id": graph.get("graph_id"),
+            "description": graph.get("description"),
+            "entry_point": graph.get("entry_node"),
+            "end_nodes": graph.get("end_nodes", []),
+            "final_output_field": graph.get("final_output_field"),
+        }
+    )
+
+    nodes: dict[str, dict[str, Any]] = {}
+    for node in graph.get("nodes", []):
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("node_id") or "").strip()
+        if not node_id:
+            continue
+        if node_id in nodes:
+            raise ValueError(f"Duplicate graph node_id: {node_id}")
+        node_type = str(node.get("node_type") or "").strip().lower()
+        if node_type == "agent":
+            runtime_node: dict[str, Any] = {
+                "type": "agent",
+                "agent": node.get("agent_id") or node.get("agent_name"),
+                "description": node.get("description"),
+                "reads_state": node.get("reads_state", []),
+                "writes_state": node.get("writes_state", []),
+            }
+        else:
+            runtime_node = {
+                "type": "deterministic",
+                "reads_state": node.get("reads_state", []),
+                "writes_state": node.get("writes_state", []),
+                "operation": {
+                    "type": node.get("operation_type"),
+                    "description": node.get("description"),
+                    "parameters": (
+                        node.get("metadata", {}).get("parameters", {})
+                        if isinstance(node.get("metadata"), dict)
+                        else {}
+                    ),
+                },
+            }
+        for field_name in ("command_destinations",):
+            if field_name in node:
+                runtime_node[field_name] = node[field_name]
+        nodes[node_id] = runtime_node
+    normalized["nodes"] = nodes
+
+    normalized["edges"] = [
+        {"from": edge.get("source"), "to": edge.get("target")}
+        for edge in graph.get("edges", [])
+        if isinstance(edge, dict)
+    ]
+    existing_edges = {
+        (str(edge.get("from")), str(edge.get("to")))
+        for edge in normalized["edges"]
+    }
+    for end_node in normalized["end_nodes"]:
+        pair = (str(end_node), "END")
+        if pair not in existing_edges:
+            normalized["edges"].append({"from": pair[0], "to": pair[1]})
+    conditional_edges: list[dict[str, Any]] = []
+    for edge in graph.get("conditional_edges", []):
+        if not isinstance(edge, dict):
+            continue
+        runtime_edge: dict[str, Any] = {"from": edge.get("source")}
+        for field_name in (
+            "decision_field",
+            "router",
+            "default_route",
+            "send_destinations",
+        ):
+            if field_name in edge:
+                runtime_edge[field_name] = edge[field_name]
+        routes = edge.get("routes")
+        if isinstance(routes, list):
+            path_map: dict[str, Any] = {}
+            for route in routes:
+                if not isinstance(route, dict) or not route.get("route_key"):
+                    continue
+                route_key = str(route["route_key"])
+                if route_key in path_map:
+                    raise ValueError(
+                        f"Duplicate route_key '{route_key}' for conditional source "
+                        f"'{edge.get('source')}'"
+                    )
+                path_map[route_key] = route.get("target")
+            runtime_edge["path_map"] = path_map
+        conditional_edges.append(runtime_edge)
+    normalized["conditional_edges"] = conditional_edges
+    return normalized
+
+
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
@@ -176,7 +277,7 @@ def get_models_config() -> dict[str, Any]:
 
 @lru_cache
 def get_graph_config() -> dict[str, Any]:
-    return load_yaml_file(get_settings().graph_config_path)
+    return normalize_graph_config(load_yaml_file(get_settings().graph_config_path))
 
 
 @lru_cache
