@@ -11,6 +11,7 @@ graph:
       node_type: deterministic
       agent_name: null
       operation_type: input_validation
+      execution_mode: null
       description: Validate and normalize incoming customer feedback.
       reads_state:
         - user_input
@@ -27,6 +28,7 @@ graph:
       node_type: agent
       agent_name: sentiment_classifier
       operation_type: null
+      execution_mode: null
       description: Classify feedback sentiment and confidence.
       reads_state:
         - normalized_feedback
@@ -40,6 +42,7 @@ graph:
       node_type: deterministic
       agent_name: null
       operation_type: feedback_scoring
+      execution_mode: null
       description: Calculate deterministic urgency and policy-risk scores.
       reads_state:
         - normalized_feedback
@@ -58,6 +61,7 @@ graph:
       node_type: agent
       agent_name: appreciation_responder
       operation_type: null
+      execution_mode: null
       description: Produce an appreciation response.
       reads_state:
         - normalized_feedback
@@ -70,6 +74,7 @@ graph:
       node_type: agent
       agent_name: clarification_responder
       operation_type: null
+      execution_mode: null
       description: Ask the customer for clarification.
       reads_state:
         - normalized_feedback
@@ -83,6 +88,7 @@ graph:
       node_type: agent
       agent_name: service_recovery_responder
       operation_type: null
+      execution_mode: null
       description: Draft an empathetic service-recovery response.
       reads_state:
         - normalized_feedback
@@ -96,6 +102,7 @@ graph:
       node_type: agent
       agent_name: policy_advisor
       operation_type: null
+      execution_mode: null
       description: Apply policy guidance to the response.
       reads_state:
         - normalized_feedback
@@ -110,6 +117,7 @@ graph:
       node_type: deterministic
       agent_name: null
       operation_type: human_review_interrupt
+      execution_mode: null
       description: Pause high-risk feedback for a human decision and response.
       reads_state:
         - normalized_feedback
@@ -127,6 +135,7 @@ graph:
       node_type: deterministic
       agent_name: null
       operation_type: response_formatting
+      execution_mode: null
       description: Produce the final public response from response or error state.
       reads_state:
         - errors
@@ -138,27 +147,21 @@ graph:
   edges:
     - source: classify_sentiment
       target: evaluate_feedback
-      protocol: sync
       description: Pass sentiment analysis to deterministic evaluation.
     - source: appreciation_response
       target: finalize_output
-      protocol: sync
       description: Format the appreciation response.
     - source: clarification_response
       target: finalize_output
-      protocol: sync
       description: Format the clarification response.
     - source: service_recovery_response
       target: policy_guidance
-      protocol: sync
       description: Apply policy guidance to the recovery response.
     - source: policy_guidance
       target: finalize_output
-      protocol: sync
       description: Format the policy-aware response.
     - source: human_review
       target: finalize_output
-      protocol: sync
       description: Format the reviewed response.
   conditional_edges:
     - source: prepare_feedback

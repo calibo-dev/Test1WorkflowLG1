@@ -288,14 +288,29 @@ def _validate_graph_config() -> None:
     command_sources: set[str] = set()
     command_destinations_by_source: dict[str, list[str]] = {}
     deterministic_node_ids: set[str] = set()
+    runtime_override_node_ids: set[str] = set()
     for node_id, node_config in nodes.items():
         if not isinstance(node_id, str) or not node_id.strip():
             raise ValueError("graph_config.yaml node ids must be non-empty strings")
         if not isinstance(node_config, Mapping):
             raise ValueError(f"graph_config.yaml node '{node_id}' must be a mapping")
 
+        execution_mode = node_config.get("execution_mode")
+        if execution_mode not in {None, "sync", "async", "background"}:
+            raise ValueError(
+                f"Node '{node_id}' execution_mode must be sync, async, background, or null"
+            )
+
         node_type = node_config.get("type")
+        runtime_override = node_config.get("runtime_override") is True
+        if runtime_override:
+            runtime_override_node_ids.add(str(node_id))
         if node_type == "agent":
+            if execution_mode == "background":
+                raise ValueError(
+                    f"Agent node '{node_id}' cannot use background execution directly; "
+                    "use a deterministic dispatch node with acknowledgement/job outputs"
+                )
             agent_id = node_config.get("agent")
             if agent_id not in agents:
                 raise ValueError(
@@ -386,10 +401,15 @@ def _validate_graph_config() -> None:
             command_destinations_by_source[str(node_id)] = destinations
 
     registered_node_ids = set(NODE_REGISTRY)
-    if registered_node_ids != deterministic_node_ids:
+    expected_registered_node_ids = (
+        deterministic_node_ids | runtime_override_node_ids
+    )
+    if registered_node_ids != expected_registered_node_ids:
         raise ValueError(
-            "NODE_REGISTRY keys must exactly match configured deterministic nodes: "
-            f"expected={sorted(deterministic_node_ids)} actual={sorted(registered_node_ids)}"
+            "NODE_REGISTRY keys must exactly match configured deterministic and "
+            "runtime-override nodes: "
+            f"expected={sorted(expected_registered_node_ids)} "
+            f"actual={sorted(registered_node_ids)}"
         )
     non_callable_nodes = sorted(
         node_id for node_id, node_callable in NODE_REGISTRY.items() if not callable(node_callable)

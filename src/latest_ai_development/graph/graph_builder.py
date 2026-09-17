@@ -26,17 +26,18 @@ class GraphBuilder:
         node_id: str,
         node_config: Mapping[str, Any],
     ) -> Callable[..., Any]:
+        override = NODE_REGISTRY.get(node_id)
+        if override is not None:
+            return override
         if node_config.get("type") == "agent":
             return AgentNodeBuilder.build(
                 node_id=node_id,
                 agent_id=str(node_config["agent"]),
+                execution_mode=str(node_config.get("execution_mode") or "async"),
             )
-        try:
-            return NODE_REGISTRY[node_id]
-        except KeyError as exc:
-            raise ValueError(
-                f"Deterministic node '{node_id}' is absent from NODE_REGISTRY"
-            ) from exc
+        raise ValueError(
+            f"Deterministic node '{node_id}' is absent from NODE_REGISTRY"
+        )
 
     @staticmethod
     def _resolve_router_callable(router_id: str) -> Callable[..., Any]:

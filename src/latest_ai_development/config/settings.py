@@ -212,6 +212,13 @@ def normalize_graph_config(config: dict[str, Any]) -> dict[str, Any]:
                     ),
                 },
             }
+        runtime_node["execution_mode"] = node.get("execution_mode")
+        runtime_node["runtime_override"] = node.get("runtime_override") is True
+        runtime_node["metadata"] = (
+            dict(node.get("metadata") or {})
+            if isinstance(node.get("metadata"), dict)
+            else {}
+        )
         for field_name in ("command_destinations",):
             if field_name in node:
                 runtime_node[field_name] = node[field_name]

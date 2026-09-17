@@ -136,7 +136,12 @@ class AgentNodeBuilder:
     """Build an agent node entirely from agents.yaml and graph_config.yaml."""
 
     @staticmethod
-    def build(*, node_id: str, agent_id: str) -> Callable[[State], Any]:
+    def build(
+        *,
+        node_id: str,
+        agent_id: str,
+        execution_mode: str = "async",
+    ) -> Callable[[State], Any]:
         agent_config = _get_agent_config(agent_id)
         provider = normalize_provider_name(str(agent_config["provider"]))
         model = str(agent_config["model"])
@@ -158,7 +163,22 @@ class AgentNodeBuilder:
             agent_kwargs["response_format"] = response_format
         agent = create_agent(**agent_kwargs)
 
-        async def agent_node(state: State, /) -> dict[str, Any]:
+        def agent_node_sync(state: State, /) -> dict[str, Any]:
+            logger.info(
+                "Invoking configured agent | node_id=%s | agent_id=%s | tools=%s",
+                node_id,
+                agent_id,
+                summarize_tools(tools),
+            )
+            result = agent.invoke(
+                cast(
+                    Any,
+                    {"messages": [HumanMessage(content=_build_user_message(state, reads_state))]},
+                )
+            )
+            return _build_state_updates(result, agent_config)
+
+        async def agent_node_async(state: State, /) -> dict[str, Any]:
             logger.info(
                 "Invoking configured agent | node_id=%s | agent_id=%s | tools=%s",
                 node_id,
@@ -173,4 +193,10 @@ class AgentNodeBuilder:
             )
             return _build_state_updates(result, agent_config)
 
-        return agent_node
+        if execution_mode == "sync":
+            return agent_node_sync
+        if execution_mode == "async":
+            return agent_node_async
+        raise ValueError(
+            f"Agent node '{node_id}' has unsupported execution_mode '{execution_mode}'"
+        )
