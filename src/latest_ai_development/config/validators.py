@@ -98,8 +98,14 @@ def _validate_tools_config() -> set[str]:
         factory_kwargs = tool_config.get("factory_kwargs", {})
         if not isinstance(factory_kwargs, Mapping):
             raise ValueError(f"Tool '{tool_name}' factory_kwargs must be a mapping")
+        resolved_kwargs = dict(factory_kwargs)
+        parameters = signature(resolved_factory).parameters
+        if "tool_name" in parameters:
+            resolved_kwargs.setdefault("tool_name", tool_name)
+        if "tool_config" in parameters:
+            resolved_kwargs.setdefault("tool_config", dict(tool_config))
         try:
-            signature(resolved_factory).bind(**dict(factory_kwargs))
+            signature(resolved_factory).bind(**resolved_kwargs)
         except TypeError as exc:
             raise ValueError(
                 f"Tool '{tool_name}' factory_kwargs do not match factory "
