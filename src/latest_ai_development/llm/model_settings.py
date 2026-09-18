@@ -80,7 +80,7 @@ def _get_provider_section_config(
 
 
 def get_model_settings(
-    provider_name: str,
+    provider_name: str | None = None,
     *,
     section: str = "primary",
     model_name: str | None = None,
@@ -89,7 +89,9 @@ def get_model_settings(
     models_cfg = get_models_config()
     secrets_manager = SecretsManager()
 
-    provider = normalize_provider_name(provider_name)
+    provider = normalize_provider_name(
+        provider_name or models_cfg.get("default_provider")
+    )
     providers = models_cfg.get("providers", {})
     resolved_provider, provider_cfg = _get_provider_section_config(
         providers,
@@ -98,10 +100,16 @@ def get_model_settings(
     )
 
     resolved_model_name = str(
-        model_name if section == "primary" else provider_cfg.get("chat_model", "")
+        (
+            model_name
+            or provider_cfg.get("chat_model")
+            or models_cfg.get("default_model")
+        )
+        if section == "primary"
+        else provider_cfg.get("chat_model", "")
     ).strip()
     if not resolved_model_name:
-        source = "agents.yaml" if section == "primary" else "models.yaml fallback"
+        source = "models.yaml defaults" if section == "primary" else "models.yaml fallback"
         raise ValueError(f"Model name for provider '{resolved_provider}' is missing from {source}")
 
     extra: dict[str, Any] = {}

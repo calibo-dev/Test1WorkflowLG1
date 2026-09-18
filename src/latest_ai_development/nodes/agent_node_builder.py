@@ -12,7 +12,6 @@ from pydantic import BaseModel, create_model
 from latest_ai_development.config.settings import (
     BASE_DIR,
     get_agents_config,
-    normalize_provider_name,
 )
 from latest_ai_development.graph.state import State
 from latest_ai_development.llm.llm_factory import LLMFactory, get_fallback_llms
@@ -143,9 +142,13 @@ class AgentNodeBuilder:
         execution_mode: str = "async",
     ) -> Callable[[State], Any]:
         agent_config = _get_agent_config(agent_id)
-        provider = normalize_provider_name(str(agent_config["provider"]))
-        model = str(agent_config["model"])
-        llm = LLMFactory().create_llm(provider=provider, model=model)
+        primary_settings = get_model_settings(
+            agent_config.get("provider"),
+            model_name=agent_config.get("model"),
+        )
+        provider = primary_settings.provider
+        model = primary_settings.model
+        llm = LLMFactory().create(primary_settings)
         middleware = _build_middleware(agent_id, provider, model)
         prompt = _load_prompt(str(agent_config["prompt"]))
         role = str(agent_config.get("role", "")).strip()

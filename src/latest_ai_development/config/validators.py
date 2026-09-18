@@ -157,7 +157,8 @@ def _validate_agents_config() -> None:
     if not isinstance(agents, Mapping):
         raise ValueError("agents.yaml must define an 'agents' mapping")
 
-    providers = get_models_config().get("providers", {})
+    models_config = get_models_config()
+    providers = models_config.get("providers", {})
     tool_names = _validate_tools_config()
     mcp_server_names = _validate_mcp_config()
 
@@ -168,12 +169,25 @@ def _validate_agents_config() -> None:
         if not isinstance(agent_config, Mapping):
             raise ValueError(f"Agent '{agent_id}' configuration must be a mapping")
 
-        provider = normalize_provider_name(agent_config.get("provider"))
+        provider = normalize_provider_name(
+            agent_config.get("provider") or models_config.get("default_provider")
+        )
         if not provider or provider not in providers:
             raise ValueError(f"Agent '{agent_id}' references unknown provider '{provider}'")
-        model = agent_config.get("model")
+        provider_config = providers.get(provider, {})
+        model = (
+            agent_config.get("model")
+            or (
+                provider_config.get("chat_model")
+                if isinstance(provider_config, Mapping)
+                else None
+            )
+            or models_config.get("default_model")
+        )
         if not isinstance(model, str) or not model.strip():
-            raise ValueError(f"Agent '{agent_id}' must define a model name")
+            raise ValueError(
+                f"Agent '{agent_id}' must define a model name or use a configured default"
+            )
 
         prompt_value = agent_config.get("prompt")
         if not isinstance(prompt_value, str) or not prompt_value.strip():
@@ -589,9 +603,24 @@ def validate_configuration() -> None:
     if not isinstance(providers, dict) or not providers:
         raise ValueError("models.yaml must define at least one provider")
 
+    default_provider = normalize_provider_name(models_config.get("default_provider"))
+    if not default_provider or default_provider not in providers:
+        raise ValueError(
+            "models.yaml default_provider must reference a configured provider"
+        )
+    default_model = models_config.get("default_model")
+    if not isinstance(default_model, str) or not default_model.strip():
+        raise ValueError("models.yaml must define a non-empty default_model")
+
     for provider_name, provider_config in providers.items():
         if not isinstance(provider_config, dict):
             raise ValueError(f"Provider '{provider_name}' must be a mapping in models.yaml")
+        if not isinstance(provider_config.get("chat_model"), str) or not str(
+            provider_config["chat_model"]
+        ).strip():
+            raise ValueError(
+                f"Provider '{provider_name}' must define chat_model in models.yaml"
+            )
         fallback_config = provider_config.get("fallback")
         if fallback_config:
             _validate_provider_model_section(
@@ -610,7 +639,7 @@ def validate_configuration() -> None:
     _validate_agents_config()
     for agent_config in get_agents_config()["agents"].values():
         get_model_settings(
-            str(agent_config["provider"]),
-            model_name=str(agent_config["model"]),
+            agent_config.get("provider"),
+            model_name=agent_config.get("model"),
         )
     _validate_graph_config()
