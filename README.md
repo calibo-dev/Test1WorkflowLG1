@@ -110,6 +110,7 @@ Common values:
 - `LANGSMITH_PROJECT`
 - `CLOUD_PROVIDER`
 - `AWS_REGION`
+- `AWS_REGION_NAME` (Amazon Bedrock model region)
 - `AZURE_KEY_VAULT_URL`
 
 Model defaults come from `src/latest_ai_development/config/models.yaml`, not from hardcoded values in the graph or node files.
@@ -199,6 +200,10 @@ Typical API key configuration:
 - Bedrock:
   - direct value: `BEDROCK_AI_API_KEY`
   - secret reference: `BEDROCK_AI_API_KEY_SECRET`
+  - model region: `AWS_REGION_NAME` (required)
+
+`AWS_REGION` continues to configure AWS service clients such as Secrets Manager.
+`AWS_REGION_NAME` independently selects the AWS region used by `ChatBedrockConverse`.
 
 ## Observability and Tracing
 
