@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from importlib import import_module
-from inspect import isawaitable
+from inspect import isawaitable, signature
 from typing import Any
 
 from latest_ai_development.config.settings import (
@@ -64,7 +64,13 @@ def _load_configured_tool(tool_name: str) -> Any:
     factory_kwargs = tool_config.get("factory_kwargs", {})
     if not isinstance(factory_kwargs, Mapping):
         raise ValueError(f"Tool '{tool_name}' factory_kwargs must be a mapping")
-    tool = factory(**dict(factory_kwargs))
+    resolved_kwargs = dict(factory_kwargs)
+    parameters = signature(factory).parameters
+    if "tool_name" in parameters:
+        resolved_kwargs.setdefault("tool_name", tool_name)
+    if "tool_config" in parameters:
+        resolved_kwargs.setdefault("tool_config", dict(tool_config))
+    tool = factory(**resolved_kwargs)
     register_tool(tool_name, tool)
     return tool
 

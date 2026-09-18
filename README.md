@@ -10,7 +10,8 @@ The template separates workflow configuration from stable runtime code:
 
 - `config/agents.yaml` defines agent roles, prompts, concrete providers and model
   names, state access, outputs, and tool/MCP assignments.
-- `config/tools.yaml` defines ordinary Python tool factories.
+- `config/tools.yaml` defines tools and maps each connector type to a shared
+  Python factory.
 - `config/mcp.yaml` defines MCP server transports and connection metadata.
 - `config/graph_config.yaml` defines nodes, entry/end nodes, direct edges,
   conditional routes, tracing, and the final output field.
@@ -71,27 +72,35 @@ agents:
     mcp_servers: []
 ```
 
-Tool-backed agents list configured tool names in `tools`. Tool definitions use a
-factory reference in `config/tools.yaml`:
+Tool-backed agents list configured tool names in `tools`. Tools using the same
+connector may share one factory module; the registry passes that factory the
+tool's exact name and complete YAML definition:
 
 ```yaml
 tools:
-  country_data:
-    factory: latest_ai_development.tools.country_data:create_tool
+  Country Data Tool:
+    factory: latest_ai_development.tools.snowflake_connector:create_tool
     description: Read-only country reference lookup.
+    purpose: Retrieve country and geographic reference data.
     connector:
       category: RDBMS
       type: SNOWFLAKE
-    factory_kwargs:
-      table_name: ak_country
-      read_only: true
+    configuration:
+      account: example-account
+      warehouse: example-warehouse
+      database: example-database
+      schema: example-schema
+      user: example-service-user
+      role: example-read-role
+      host: example-account.snowflakecomputing.com
 ```
 
-The generic registry imports the factory lazily, calls it with `factory_kwargs`,
-and caches the resulting tool. Optional `description`, `connector`, `tags`,
-`usage_guidelines`, and `non_usage_guidelines` document the tool contract. Keep
-credentials outside YAML; factories should read them from environment variables
-or the configured secrets manager.
+The generic registry imports the factory lazily and injects `tool_name` and
+`tool_config` when the factory accepts them. It then caches the resulting tool.
+This permits one generated connector module to serve every tool of that connector
+type while preserving separate tool identities, configuration, descriptions, and
+guidelines. Non-secret connection metadata may remain in YAML; credentials such
+as PATs stay in environment variables and the configured secrets manager.
 
 MCP servers are declared separately in `config/mcp.yaml`:
 

@@ -1,17 +1,24 @@
-# Copy-ready Python tool example. The only required field is `factory`.
-# Keep passwords, tokens, and private keys out of this file; the factory should
-# read credentials from environment variables or the secrets manager.
+# Connector-oriented tool example. Multiple tools using the same connector point
+# to the same factory; the registry supplies each tool's name and complete YAML
+# definition to that factory. Keep secrets out of this file.
 #
 # tools:
-#   ak_country_lookup:
-#     factory: latest_ai_development.tools.ak_country_lookup:create_tool
+#   AK Country Data Agentic Tool:
+#     factory: latest_ai_development.tools.snowflake_connector:create_tool
 #     description: Read-only country reference lookup backed by Snowflake.
+#     purpose: Retrieve country and geographic reference data.
 #     connector:
 #       category: RDBMS
 #       type: SNOWFLAKE
-#     factory_kwargs:
-#       table_name: ak_country
-#       read_only: true
+#     configuration:
+#       account: example-account
+#       warehouse: example-warehouse
+#       database: example-database
+#       schema: example-schema
+#       user: example-service-user
+#       role: example-read-role
+#       host: example-account.snowflakecomputing.com
+#     connection_name: example-connection
 #     tags:
 #       - country
 #       - snowflake
@@ -26,5 +33,5 @@
 # agents:
 #   data_lookup_agent:
 #     tools:
-#       - ak_country_lookup
+#       - AK Country Data Agentic Tool
 tools: {}
