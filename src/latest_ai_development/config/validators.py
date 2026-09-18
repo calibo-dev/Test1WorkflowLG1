@@ -495,9 +495,9 @@ def _validate_graph_config() -> None:
                 reverse_adjacency[target].add(str(source))
             continue
 
-        if bool(router) == bool(decision_field):
+        if not router and not decision_field:
             raise ValueError(
-                f"Conditional edge '{source}' must define exactly one of router or decision_field"
+                f"Conditional edge '{source}' must define router or decision_field"
             )
         if router:
             router_id = str(router)
