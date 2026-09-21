@@ -10,6 +10,7 @@ from typing import Any, NotRequired, Required, get_args, get_origin, get_type_hi
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from latest_ai_development.config.settings import get_settings
@@ -173,7 +174,7 @@ async def health() -> dict[str, Any]:
     }
 
 
-async def ask(payload: BaseModel, http_request: Request) -> dict[str, Any]:
+async def ask(payload: BaseModel, http_request: Request) -> dict[str, Any] | JSONResponse:
     payload_values = payload.model_dump(exclude_unset=True)
     flow_run_id = uuid4().hex[:12]
     thread_id = str(payload_values.get("thread_id") or flow_run_id)
@@ -207,16 +208,19 @@ async def ask(payload: BaseModel, http_request: Request) -> dict[str, Any]:
             thread_id=thread_id,
             context=context or {},
         )
-    except Exception as exc:
+    except Exception:
         logger.exception(
             "Request failed | flow_run_id=%s | thread_id=%s",
             flow_run_id,
             thread_id,
         )
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail=f"Workflow execution failed. flow_run_id={flow_run_id}",
-        ) from exc
+            content={
+                "status": "error",
+                "response": "Something went wrong. Please contact your administrator.",
+            },
+        )
 
     logger.info(
         "Request completed | flow_run_id=%s | thread_id=%s",

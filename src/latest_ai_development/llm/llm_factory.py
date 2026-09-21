@@ -65,6 +65,13 @@ class LLMFactory:
         )
 
         if provider == "openai":
+            if model_settings.model.startswith("gpt-5"):
+                return ChatOpenAI(
+                    model=model_settings.model,
+                    api_key=model_settings.extra.get("api_key"),
+                    max_completion_tokens=model_settings.max_tokens,
+                )
+
             return ChatOpenAI(
                 model=model_settings.model,
                 temperature=model_settings.temperature,
