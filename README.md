@@ -367,6 +367,7 @@ Common environment variables:
   `BEDROCK_AI_API_KEY`.
 - `CLOUD_PROVIDER`: empty for local mode, `AWS`, or `AZURE`.
 - `AZURE_KEY_VAULT_URL` and `AWS_REGION`.
+- `AWS_REGION_NAME`: Amazon Bedrock model region.
 - `TRACING_BACKEND`: `NONE` or `LANGSMITH`.
 - `LANGSMITH_API_KEY` and `LANGSMITH_PROJECT`.
 - `API_HOST`, `PORT`, and `API_ROOT_PATH`.
