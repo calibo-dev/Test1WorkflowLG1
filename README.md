@@ -37,17 +37,19 @@ START
        invalid -> finalize_output -> END
        valid   -> classify_sentiment -> evaluate_feedback
                     appreciation    -> appreciation_response -> finalize_output
-                    clarification   -> clarification_response -> finalize_output
+                    clarification   -> clarification_response
+                                        -> request_clarification -> classify_sentiment
                     service_recovery -> service_recovery_response
                                         -> policy_guidance -> finalize_output
-                    human_review    -> interrupt/resume -> finalize_output
+                    human_review    -> interrupt/approval -> finalize_output
 ```
 
 The sample shows both routing styles. `prepare_feedback` uses a simple configured
 `decision_field`. `evaluate_feedback` computes weighted urgency and policy-risk
 scores, then a named Python router combines those scores with sentiment and model
-confidence to select one of four paths. High-risk feedback pauses at
-`human_review`; negative feedback runs a two-agent recovery and policy branch.
+confidence to select one of four paths. Confident positive and ordinary negative
+feedback receive automatic responses. Unclear feedback pauses for clarification
+and is reclassified after resume; high-risk feedback pauses for approval.
 
 ## Agent Configuration
 
@@ -186,8 +188,8 @@ graph:
 `operation_type`, `description`, and `metadata.parameters` are
 descriptive, requirement-derived metadata. They are available to validation and
 workflow UIs but are not executed by the graph runtime. This keeps one consistent
-implementation path for input validation, routing calculations, interrupts,
-custom algorithms, and every other deterministic node.
+implementation path for input validation, routing calculations, custom algorithms,
+and every other deterministic node.
 
 For example, a scoring node uses the same shape:
 
@@ -344,9 +346,10 @@ Response:
 ```
 
 The FastAPI path awaits `graph.ainvoke()` and never blocks the event loop with a
-synchronous graph call. Persistence is enabled through the configured checkpointer;
-when a node calls LangGraph `interrupt()`, send its returned `thread_id` and the
-user's answer to `POST /resume` as `{"thread_id":"demo-1","value":...}`.
+synchronous graph call. Persistence is enabled through the configured checkpointer.
+Fully automatic graphs expose only `/ask`. A graph that deliberately uses
+LangGraph interrupts can set `execution.resume_enabled: true` (with persistence
+enabled) to expose `/resume` and continue a saved thread.
 FastAPI lifespan validates configuration and compiles one reusable workflow at
 startup, then closes graph and registered tool resources during shutdown.
 

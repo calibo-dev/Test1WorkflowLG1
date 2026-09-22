@@ -75,14 +75,30 @@ graph:
       agent_name: clarification_responder
       operation_type: null
       execution_mode: null
-      description: Ask the customer for clarification.
+      description: Generate a focused clarification question for unclear feedback.
       reads_state:
         - normalized_feedback
         - sentiment
         - confidence
       writes_state:
-        - final_response
+        - clarification_question
       metadata: {}
+
+    - node_id: request_clarification
+      node_type: deterministic
+      agent_name: null
+      operation_type: clarification_interrupt
+      execution_mode: null
+      description: Pause for clarification and add the answer to the feedback context.
+      reads_state:
+        - normalized_feedback
+        - clarification_question
+      writes_state:
+        - normalized_feedback
+        - clarification_question
+      metadata:
+        parameters:
+          resume_required: true
 
     - node_id: service_recovery_response
       node_type: agent
@@ -118,7 +134,7 @@ graph:
       agent_name: null
       operation_type: human_review_interrupt
       execution_mode: null
-      description: Pause high-risk feedback for a human decision and response.
+      description: Pause high-risk feedback for an approved response.
       reads_state:
         - normalized_feedback
         - sentiment
@@ -152,8 +168,11 @@ graph:
       target: finalize_output
       description: Format the appreciation response.
     - source: clarification_response
-      target: finalize_output
-      description: Format the clarification response.
+      target: request_clarification
+      description: Ask the generated clarification question.
+    - source: request_clarification
+      target: classify_sentiment
+      description: Reclassify feedback with the customer's clarification.
     - source: service_recovery_response
       target: policy_guidance
       description: Apply policy guidance to the recovery response.
@@ -162,7 +181,7 @@ graph:
       description: Format the policy-aware response.
     - source: human_review
       target: finalize_output
-      description: Format the reviewed response.
+      description: Format the approved high-risk response.
   conditional_edges:
     - source: prepare_feedback
       decision_field: validation_status
@@ -183,13 +202,13 @@ graph:
           description: Generate an appreciation response.
         - route_key: clarification
           target: clarification_response
-          description: Ask for clarification.
+          description: Request clarification before responding.
         - route_key: service_recovery
           target: service_recovery_response
           description: Start service recovery.
         - route_key: human_review
           target: human_review
-          description: Pause for human review.
+          description: Request approval for a high-risk response.
 
 persistence:
   enabled: true
@@ -197,6 +216,7 @@ persistence:
 
 execution:
   save_output: false
+  resume_enabled: true
 
 runtime_context:
   defaults: {}

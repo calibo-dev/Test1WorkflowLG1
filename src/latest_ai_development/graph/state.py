@@ -24,6 +24,7 @@ class State(InputState, OutputState, total=False):
     sentiment: str
     confidence: str
     sentiment_reason: str
+    clarification_question: str
     urgency_score: int
     policy_risk_score: int
     draft_response: str

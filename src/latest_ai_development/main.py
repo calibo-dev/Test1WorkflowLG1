@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import sys
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, NotRequired, Required, get_args, get_origin, get_type_hints
@@ -13,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
-from latest_ai_development.config.settings import get_settings
+from latest_ai_development.config.settings import get_graph_config, get_settings
 from latest_ai_development.config.validators import validate_configuration
 from latest_ai_development.graph.state import InputState, OutputState, State
 from latest_ai_development.logging_utils import configure_logging
@@ -49,6 +50,14 @@ def _initialize_workflow() -> LatestAiDevelopmentWorkflow:
 
 
 API_ROOT_PATH = settings.normalized_api_root_path
+
+
+def _is_resume_enabled(graph_config: Mapping[str, Any]) -> bool:
+    execution = graph_config.get("execution", {})
+    return isinstance(execution, Mapping) and execution.get("resume_enabled") is True
+
+
+RESUME_ENABLED = _is_resume_enabled(get_graph_config())
 
 
 @asynccontextmanager
@@ -174,7 +183,7 @@ async def health() -> dict[str, Any]:
     }
 
 
-async def ask(payload: BaseModel, http_request: Request) -> dict[str, Any] | JSONResponse:
+async def ask(payload: BaseModel, http_request: Request) -> Any:
     payload_values = payload.model_dump(exclude_unset=True)
     flow_run_id = uuid4().hex[:12]
     thread_id = str(payload_values.get("thread_id") or flow_run_id)
@@ -234,8 +243,7 @@ ask.__annotations__["payload"] = AskRequest
 app.post("/ask", response_model=AskResponse)(ask)
 
 
-@app.post("/resume", response_model=AskResponse)
-async def resume(request: ResumeRequest, http_request: Request):
+async def resume(request: ResumeRequest, http_request: Request) -> dict[str, Any]:
     workflow = _get_workflow(http_request)
     try:
         result = await workflow.aresume(
@@ -247,6 +255,10 @@ async def resume(request: ResumeRequest, http_request: Request):
         logger.exception("Workflow resume failed | thread_id=%s", request.thread_id)
         raise HTTPException(status_code=500, detail="Workflow resume failed") from exc
     return _build_response(result, workflow=workflow, thread_id=request.thread_id)
+
+
+if RESUME_ENABLED:
+    app.post("/resume", response_model=AskResponse)(resume)
 
 
 async def _run_cli_workflow(inputs: dict[str, Any]) -> State:
@@ -296,14 +308,15 @@ if API_ROOT_PATH:
         include_in_schema=False,
     )
     app.add_api_route(
-        f"{API_ROOT_PATH}/resume",
-        resume,
-        methods=["POST"],
-        include_in_schema=False,
-    )
-    app.add_api_route(
         f"{API_ROOT_PATH}/ask",
         ask,
         methods=["POST"],
         include_in_schema=False,
     )
+    if RESUME_ENABLED:
+        app.add_api_route(
+            f"{API_ROOT_PATH}/resume",
+            resume,
+            methods=["POST"],
+            include_in_schema=False,
+        )

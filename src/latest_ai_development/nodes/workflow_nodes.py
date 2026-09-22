@@ -73,9 +73,35 @@ def evaluate_feedback(state: State, /) -> dict[str, Any]:
     }
 
 
+def request_clarification(state: State, /) -> dict[str, Any]:
+    clarification = interrupt(
+        {
+            "kind": "clarification",
+            "question": state.get(
+                "clarification_question",
+                "Could you provide more detail about your experience?",
+            ),
+            "feedback": state.get("normalized_feedback", ""),
+        }
+    )
+    if isinstance(clarification, Mapping):
+        response = clarification.get("response", clarification.get("value", ""))
+    else:
+        response = clarification
+    response_text = str(response).strip()
+    original_feedback = str(state.get("normalized_feedback", "")).strip()
+    return {
+        "normalized_feedback": (
+            f"{original_feedback}\nCustomer clarification: {response_text}"
+        ).strip(),
+        "clarification_question": "",
+    }
+
+
 def human_review(state: State, /) -> dict[str, Any]:
     review = interrupt(
         {
+            "kind": "approval",
             "question": "Review this high-risk customer feedback and provide a response.",
             "feedback": state.get("normalized_feedback", ""),
             "sentiment": state.get("sentiment", "unknown"),
@@ -119,6 +145,7 @@ def route_after_evaluation(state: State, /) -> RouteName:
 NODE_REGISTRY: dict[str, NodeCallable] = {
     "prepare_feedback": prepare_feedback,
     "evaluate_feedback": evaluate_feedback,
+    "request_clarification": request_clarification,
     "human_review": human_review,
     "finalize_output": finalize_output,
 }

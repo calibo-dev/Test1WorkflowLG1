@@ -153,6 +153,23 @@ class LatestAiDevelopmentWorkflow:
         logger.info("Workflow completed | flow_run_id=%s", flow_run_id)
         return result
 
+    async def _ainvoke(
+        self,
+        graph_input: State | Command,
+        *,
+        flow_run_id: str,
+        inputs: dict[str, Any],
+        thread_id: str,
+        context: RuntimeContext,
+    ) -> State:
+        config = {"configurable": {"thread_id": thread_id}}
+        return await atrace_workflow_execution(
+            lambda value: self.get_graph().ainvoke(value, config=config, context=context),
+            flow_run_id=flow_run_id,
+            inputs=inputs,
+            initial_state=graph_input,
+        )
+
     async def aresume(
         self,
         *,
@@ -171,23 +188,6 @@ class LatestAiDevelopmentWorkflow:
         )
         self._save_result(result, flow_run_id=flow_run_id)
         return result
-
-    async def _ainvoke(
-        self,
-        graph_input: State | Command,
-        *,
-        flow_run_id: str,
-        inputs: dict[str, Any],
-        thread_id: str,
-        context: RuntimeContext,
-    ) -> State:
-        config = {"configurable": {"thread_id": thread_id}}
-        return await atrace_workflow_execution(
-            lambda value: self.get_graph().ainvoke(value, config=config, context=context),
-            flow_run_id=flow_run_id,
-            inputs=inputs,
-            initial_state=graph_input,
-        )
 
     def _save_result(self, result: State, *, flow_run_id: str) -> None:
         public_output = {

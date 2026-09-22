@@ -300,6 +300,17 @@ def _validate_graph_config() -> None:
         if backend != "memory":
             raise ValueError(f"Unsupported persistence backend '{backend}'")
 
+    execution = graph_config.get("execution", {})
+    if not isinstance(execution, Mapping):
+        raise ValueError("graph_config.yaml execution must be a mapping")
+    resume_enabled = execution.get("resume_enabled", False)
+    if not isinstance(resume_enabled, bool):
+        raise ValueError("graph_config.yaml execution.resume_enabled must be a boolean")
+    if resume_enabled and not persistence.get("enabled", False):
+        raise ValueError(
+            "graph_config.yaml persistence must be enabled when execution.resume_enabled is true"
+        )
+
     runtime_context = graph_config.get("runtime_context", {})
     if not isinstance(runtime_context, Mapping):
         raise ValueError("graph_config.yaml runtime_context must be a mapping")

@@ -51,8 +51,8 @@ agents:
       - sentiment
       - confidence
     writes_state:
-      - final_response
-    output_field: final_response
+      - clarification_question
+    output_field: clarification_question
     tools: []
     mcp_servers: []
 
