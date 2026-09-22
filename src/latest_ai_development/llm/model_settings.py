@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,7 +22,12 @@ class ModelSettings:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-def _resolve_api_key(*, direct_value: str, secret_name: str, secrets_manager: SecretsManager) -> str | None:
+def _resolve_api_key(
+    *,
+    direct_value: str,
+    secret_name: str,
+    secrets_manager: SecretsManager,
+) -> str | None:
     direct_value = direct_value.strip()
     if direct_value:
         return direct_value
@@ -77,7 +83,11 @@ def _get_provider_section_config(
     return fallback_provider, merged_cfg
 
 
-def get_model_settings(provider_name: str | None = None, *, section: str = "primary") -> ModelSettings:
+def get_model_settings(
+    provider_name: str | None = None,
+    *,
+    section: str = "primary",
+) -> ModelSettings:
     settings = get_settings()
     models_cfg = get_models_config()
     secrets_manager = SecretsManager()
@@ -125,20 +135,33 @@ def get_model_settings(provider_name: str | None = None, *, section: str = "prim
         extra["api_key"] = api_key
 
     elif resolved_provider == "bedrockai":
-        api_key = _resolve_required_api_key(
+        bedrock_api_key = _resolve_api_key(
             direct_value=settings.bedrock_ai_api_key,
             secret_name=settings.bedrock_ai_api_key_secret,
             secrets_manager=secrets_manager,
         )
-        extra["api_key"] = api_key
-        extra["region_name"] = settings.aws_region
+        region_name = os.getenv("AWS_REGION_NAME", "").strip()
+        if not bedrock_api_key:
+            raise ValueError(
+                "BedrockAI API key not found. "
+                "Set BEDROCK_AI_API_KEY or BEDROCK_AI_API_KEY_SECRET."
+            )
+        if not region_name:
+            raise ValueError(
+                "AWS_REGION_NAME is required for the BEDROCKAI provider. "
+                "Configure a region where Amazon Bedrock is available."
+            )
+        extra["api_key"] = bedrock_api_key
+        extra["region_name"] = region_name
 
     elif resolved_provider == "ollama":
         extra["base_url"] = settings.ollama_base_url
 
     else:
+        supported_providers = sorted(providers.keys())
         raise ValueError(
-            f"Unsupported provider '{resolved_provider}'. Supported providers: {sorted(providers.keys())}"
+            f"Unsupported provider '{resolved_provider}'. "
+            f"Supported providers: {supported_providers}"
         )
 
     return ModelSettings(
