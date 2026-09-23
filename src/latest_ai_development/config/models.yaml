@@ -28,6 +28,10 @@ providers:
     chat_model: us.anthropic.claude-opus-5
     max_tokens: 4000
 
+  microsoftfoundryai:
+    chat_model: claude-sonnet-4-6
+    max_tokens: 4000
+
   ollama:
     chat_model: llama3
     temperature: 0.3

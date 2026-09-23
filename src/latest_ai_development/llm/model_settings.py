@@ -55,6 +55,13 @@ def _resolve_required_api_key(
     return api_key
 
 
+def _resolve_microsoft_foundry_ai_endpoint(endpoint: str) -> dict[str, str]:
+    if endpoint.endswith("/anthropic"):
+        return {"api_family": "anthropic_messages","base_url": endpoint}
+    if endpoint.endswith("/openai"):
+        return {"api_family": "openai_responses","base_url": f"{endpoint}/v1"}
+    raise ValueError("MICROSOFT_FOUNDRY_AI_ENDPOINT must end with /anthropic or /openai.")
+
 def _get_provider_section_config(
     providers: dict[str, Any],
     *,
@@ -153,6 +160,20 @@ def get_model_settings(
             )
         extra["api_key"] = bedrock_api_key
         extra["region_name"] = region_name
+
+    elif resolved_provider == "microsoftfoundryai":
+        api_key = _resolve_required_api_key(
+            direct_value=settings.microsoft_foundry_ai_api_key,
+            secret_name=settings.microsoft_foundry_ai_api_key_secret,
+            secrets_manager=secrets_manager,
+        )
+        endpoint = settings.microsoft_foundry_ai_endpoint.strip()
+        if not endpoint:
+            raise ValueError("MICROSOFT_FOUNDRY_AI_ENDPOINT is required for Microsoft Foundry AI.")
+        endpoint_settings = _resolve_microsoft_foundry_ai_endpoint(endpoint)
+        extra["api_key"] = api_key
+        extra["api_family"] = endpoint_settings["api_family"]
+        extra["base_url"] = endpoint_settings["base_url"]
 
     elif resolved_provider == "ollama":
         extra["base_url"] = settings.ollama_base_url

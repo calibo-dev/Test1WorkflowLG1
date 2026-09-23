@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
+from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
@@ -73,14 +75,6 @@ class LLMFactory:
             )
 
         if provider == "anthropicai":
-            try:
-                from langchain_anthropic import ChatAnthropic
-            except ImportError as exc:
-                raise ImportError(
-                    "Anthropic provider requires the 'langchain-anthropic' package. "
-                    "Run `uv sync` to install template dependencies."
-                ) from exc
-
             return ChatAnthropic(
                 model=model_settings.model,
                 temperature=model_settings.temperature,
@@ -119,6 +113,19 @@ class LLMFactory:
                 max_tokens=model_settings.max_tokens,
                 region_name=model_settings.extra.get("region_name"),
             )
+        if provider == "microsoftfoundryai":
+            api_key: str = model_settings.extra["api_key"]
+            if model_settings.extra.get("api_family") == "anthropic_messages":
+                return ChatAnthropic(
+                    **_foundry_kwargs(model_settings, api_key),
+                    default_headers={"api-key": api_key},
+                )
+
+            return ChatOpenAI(
+                **_foundry_kwargs(model_settings, api_key),
+                use_responses_api=True,
+                output_version="responses/v1",
+            )
 
         if provider == "ollama":
             return ChatOllama(
@@ -128,6 +135,15 @@ class LLMFactory:
             )
 
         raise ValueError(f"Unsupported provider: {provider}")
+
+
+def _foundry_kwargs(model_settings: ModelSettings, api_key: str) -> dict[str, Any]:
+    return {
+        "model": model_settings.model,
+        "api_key": api_key,
+        "base_url": model_settings.extra.get("base_url"),
+        "max_tokens": model_settings.max_tokens,
+    }
 
 
 def get_fallback_llms(provider: str | None = None) -> list[BaseChatModel]:
