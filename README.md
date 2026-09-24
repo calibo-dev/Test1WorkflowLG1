@@ -99,7 +99,7 @@ Important environment variables are resolved through `Settings` in `config/setti
 Common values:
 
 - `PROVIDER`
-  Supported by the current template: `OPENAI`, `ANTHROPIC`, `GEMINI`,`BEDROCK`, `OLLAMA`
+  Supported by the current template: `OPENAI`, `ANTHROPIC`,`GEMINI`,`BEDROCK`,`MICROSOFTFOUNDRY`,`OLLAMA`
 - `API_HOST`
 - `PORT`
 - `API_ROOT_PATH`
@@ -201,6 +201,10 @@ Typical API key configuration:
   - direct value: `BEDROCK_AI_API_KEY`
   - secret reference: `BEDROCK_AI_API_KEY_SECRET`
   - model region: `AWS_REGION_NAME` (required)
+- Microsoft Foundry:
+  - direct value: `MICROSOFT_FOUNDRY_AI_API_KEY`
+  - secret reference: `MICROSOFT_FOUNDRY_AI_API_KEY_SECRET`
+  - endpoint: `MICROSOFT_FOUNDRY_AI_ENDPOINT`
 
 `AWS_REGION` continues to configure AWS service clients such as Secrets Manager.
 `AWS_REGION_NAME` independently selects the AWS region used by `ChatBedrockConverse`.

@@ -143,6 +143,10 @@ Typical current secret resolution:
 - Bedrock:
   - direct value: `BEDROCK_AI_API_KEY`
   - secret reference: `BEDROCK_AI_API_KEY_SECRET`
+- Microsoft Foundry:
+  - direct value: `MICROSOFT_FOUNDRY_AI_API_KEY`
+  - secret reference: `MICROSOFT_FOUNDRY_AI_API_KEY_SECRET`
+  - endpoint: `MICROSOFT_FOUNDRY_AI_ENDPOINT`
 
 ## Startup and Validation
 

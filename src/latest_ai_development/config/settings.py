@@ -18,6 +18,7 @@ PROVIDER_ALIASES = {
     "anthropic": "anthropicai",
     "bedrock": "bedrockai",
     "gemini": "geminiai",
+    "microsoftfoundry": "microsoftfoundryai",
 }
 
 def normalize_api_context(raw_context: str | None) -> str:
@@ -62,6 +63,9 @@ class Settings(BaseSettings):
     geminiai_api_key_secret: str = Field(default="", alias="GEMINIAI_API_KEY_SECRET")
     bedrock_ai_api_key: str = Field(default="", alias="BEDROCK_AI_API_KEY")
     bedrock_ai_api_key_secret: str = Field(default="", alias="BEDROCK_AI_API_KEY_SECRET")
+    microsoft_foundry_ai_api_key: str = Field(default="", alias="MICROSOFT_FOUNDRY_AI_API_KEY")
+    microsoft_foundry_ai_api_key_secret: str = Field(default="", alias="MICROSOFT_FOUNDRY_AI_API_KEY_SECRET")
+    microsoft_foundry_ai_endpoint: str = Field(default="", alias="MICROSOFT_FOUNDRY_AI_ENDPOINT")
 
     cloud_provider: str = Field(default="", alias="CLOUD_PROVIDER")
     azure_key_vault_url: str = Field(default="", alias="AZURE_KEY_VAULT_URL")
