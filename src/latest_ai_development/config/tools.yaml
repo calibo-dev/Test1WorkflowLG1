@@ -1,0 +1,37 @@
+# Connector-oriented tool example. Multiple tools using the same connector point
+# to the same factory; the registry supplies each tool's name and complete YAML
+# definition to that factory. Keep secrets out of this file.
+#
+# tools:
+#   AK Country Data Agentic Tool:
+#     factory: latest_ai_development.tools.snowflake_connector:create_tool
+#     description: Read-only country reference lookup backed by Snowflake.
+#     purpose: Retrieve country and geographic reference data.
+#     connector:
+#       category: RDBMS
+#       type: SNOWFLAKE
+#     configuration:
+#       account: example-account
+#       warehouse: example-warehouse
+#       database: example-database
+#       schema: example-schema
+#       user: example-service-user
+#       role: example-read-role
+#       host: example-account.snowflakecomputing.com
+#     connection_name: example-connection
+#     tags:
+#       - country
+#       - snowflake
+#       - read-only
+#     usage_guidelines:
+#       - Query only the configured country table.
+#       - Use current table metadata before generating SQL.
+#     non_usage_guidelines:
+#       - Do not execute data or schema modification statements.
+#
+# Then assign the exact tool key to an agent in agents.yaml:
+# agents:
+#   data_lookup_agent:
+#     tools:
+#       - AK Country Data Agentic Tool
+tools: {}

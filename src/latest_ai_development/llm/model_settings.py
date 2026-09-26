@@ -57,10 +57,11 @@ def _resolve_required_api_key(
 
 def _resolve_microsoft_foundry_ai_endpoint(endpoint: str) -> dict[str, str]:
     if endpoint.endswith("/anthropic"):
-        return {"api_family": "anthropic_messages","base_url": endpoint}
+        return {"api_family": "anthropic_messages", "base_url": endpoint}
     if endpoint.endswith("/openai"):
         return {"api_family": "openai_responses","base_url": f"{endpoint}/v1"}
     raise ValueError("MICROSOFT_FOUNDRY_AI_ENDPOINT must end with /anthropic or /openai.")
+
 
 def _get_provider_section_config(
     providers: dict[str, Any],
@@ -94,12 +95,15 @@ def get_model_settings(
     provider_name: str | None = None,
     *,
     section: str = "primary",
+    model_name: str | None = None,
 ) -> ModelSettings:
     settings = get_settings()
     models_cfg = get_models_config()
     secrets_manager = SecretsManager()
 
-    provider = normalize_provider_name(provider_name or settings.provider)
+    provider = normalize_provider_name(
+        provider_name or models_cfg.get("default_provider")
+    )
     providers = models_cfg.get("providers", {})
     resolved_provider, provider_cfg = _get_provider_section_config(
         providers,
@@ -107,13 +111,18 @@ def get_model_settings(
         section=section,
     )
 
-    model_name = str(
-        provider_cfg.get("chat_model")
-        or models_cfg.get("default_model")
-        or ""
+    resolved_model_name = str(
+        (
+            model_name
+            or provider_cfg.get("chat_model")
+            or models_cfg.get("default_model")
+        )
+        if section == "primary"
+        else provider_cfg.get("chat_model", "")
     ).strip()
-    if not model_name:
-        raise ValueError(f"Provider '{resolved_provider}' must define chat_model in models.yaml")
+    if not resolved_model_name:
+        source = "models.yaml defaults" if section == "primary" else "models.yaml fallback"
+        raise ValueError(f"Model name for provider '{resolved_provider}' is missing from {source}")
 
     extra: dict[str, Any] = {}
 
@@ -169,7 +178,9 @@ def get_model_settings(
         )
         endpoint = settings.microsoft_foundry_ai_endpoint.strip()
         if not endpoint:
-            raise ValueError("MICROSOFT_FOUNDRY_AI_ENDPOINT is required for Microsoft Foundry AI.")
+            raise ValueError(
+                "MICROSOFT_FOUNDRY_AI_ENDPOINT is required for Microsoft Foundry AI."
+            )
         endpoint_settings = _resolve_microsoft_foundry_ai_endpoint(endpoint)
         extra["api_key"] = api_key
         extra["api_family"] = endpoint_settings["api_family"]
@@ -187,7 +198,7 @@ def get_model_settings(
 
     return ModelSettings(
         provider=resolved_provider,
-        model=model_name,
+        model=resolved_model_name,
         temperature=float(provider_cfg.get("temperature", 0.3)),
         top_p=float(provider_cfg.get("top_p", 1.0)),
         max_tokens=int(provider_cfg.get("max_tokens", 2000)),
@@ -195,10 +206,9 @@ def get_model_settings(
     )
 
 
-def get_fallback_model_settings(provider_name: str | None = None) -> list[ModelSettings]:
-    settings = get_settings()
+def get_fallback_model_settings(provider_name: str) -> list[ModelSettings]:
     models_cfg = get_models_config()
-    provider = normalize_provider_name(provider_name or settings.provider)
+    provider = normalize_provider_name(provider_name)
     providers = models_cfg.get("providers", {})
     provider_cfg = providers.get(provider)
 

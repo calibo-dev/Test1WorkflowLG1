@@ -1,252 +1,156 @@
 # LangGraph Template Guide
 
-This document explains the current runtime and extension contract for the LangGraph template.
+## Purpose
 
-## What This Template Does
+This repository is a configuration-driven LangGraph starter. Prefer changing
+workflow configuration and workflow-specific behavior over changing reusable
+runtime infrastructure.
 
-The template exposes a FastAPI service that accepts a `topic`, runs a LangGraph workflow, and returns a generated `report`.
+## Sources of Truth
 
-Current API request:
+- `src/latest_ai_development/config/agents.yaml` owns agent roles, prompts,
+  concrete providers and model names, state reads/writes, output fields, and
+  tool/MCP assignments.
+- `src/latest_ai_development/config/graph_config.yaml` owns nodes, entry/end nodes,
+  direct edges, conditional routes, tracing, and the final output field.
+- `src/latest_ai_development/graph/state.py` explicitly declares `InputState`,
+  complete `State`, `OutputState`, reducers, and defaults. Nodes return partial
+  state updates only.
+- `src/latest_ai_development/config/models.yaml` owns provider generation defaults
+  and fallback configuration.
+- `src/latest_ai_development/config/tools.yaml` owns Python tool factories.
+- `src/latest_ai_development/config/mcp.yaml` owns MCP server transport settings.
+- `workflow.py` derives required request fields and public response fields from
+  `InputState` and `OutputState`; `/ask` accepts those fields dynamically.
 
-```json
-{
-  "topic": "Your Topic Here"
-}
-```
+## Stable Runtime Files
 
-Current API response:
+Do not modify these files for an ordinary workflow or agent addition:
 
-```json
-{
-  "topic": "Your Topic Here",
-  "report": "..."
-}
-```
-
-## Runtime Architecture
-
-The runtime is split into four clear layers:
-
-1. `config/settings.py`
-   Central environment and path management through `BaseSettings`.
-2. `config/models.yaml`
-   Provider and model defaults used by the LLM layer.
-3. `config/graph_config.yaml`
-   Graph topology contract: entry point, node builders, edges, conditional routes, and final output field.
-4. `workflow.py`
-   Graph lifecycle, initial state creation, invocation, and report persistence.
-5. `main.py`
-   FastAPI request/response handling and app startup.
-6. `logging_utils.py`
-   Shared logging setup aligned with the LangChain template pattern.
-
-## Current Graph Flow
-
-The compiled graph in `graph/graph_builder.py` is now loaded from `config/graph_config.yaml` and currently resolves this flow:
-
-```text
-validate_input
-  -> router_agent
-  -> research | reporting | finalize_output
-research
-  -> reporting | finalize_output
-reporting
-  -> finalize_output
-finalize_output
-  -> END
-```
-
-Node ownership:
-
-- `validate_input`
-  Deterministic orchestration node
-- `router_agent`
-  Agent-backed orchestration node
-- `research`
-  Agent-backed content generation node
-- `reporting`
-  Agent-backed content generation node
-- `finalize_output`
-  Deterministic orchestration node
-
-## Shared State
-
-The current shared state is defined in `graph/state.py` as a `TypedDict`.
-
-Active fields:
-
-- `topic`
-- `agent_plan`
-- `errors`
-- `research_result`
-- `report`
-
-If the workflow contract changes, update state, nodes, graph wiring, and request/response models together.
-For topology-only changes, update `config/graph_config.yaml` first and keep node behavior in Python.
-
-## LLM and Provider Setup
-
-LLM setup follows this path:
-
-1. `config/models.yaml`
-2. `llm/model_settings.py`
-3. `llm/llm_factory.py`
-4. node builder invocation
-
-The node builders should not hardcode model defaults. Provider selection comes from `Settings`, and per-provider model metadata comes from `models.yaml`.
-
-## Model Fallback
-
-- `src/latest_ai_development/config/models.yaml` may define an optional `fallback` block under the active provider.
-- Active agent-backed nodes keep the primary model in `create_agent(...)` and wire fallback models through LangChain `ModelFallbackMiddleware`.
-- `src/latest_ai_development/llm/model_attempt_logging.py` adds attempt-level logging for the primary model and each fallback retry.
-- Fallback is a model-call concern only; it must not be implemented as graph topology, router branching, or extra workflow nodes.
-
-## Secrets and Runtime Variables
-
-Deployment/runtime variables are resolved centrally in `config/settings.py` and then consumed by the app runtime.
-
-Handled through settings:
-
-- `API_HOST`
-- `PORT`
-- Default: `8089`
-- `API_ROOT_PATH`
-- `OUTPUT_DIR`
-- Default: `output/`
-- `REPORT_OUTPUT_FILE`
-- `AZURE_KEY_VAULT_URL`
-- `CONTEXT`
-- Default: `/`
-
-Secret handling lives in `secrets_manager.py`.
-
-Current behavior:
-
-- `CLOUD_PROVIDER=AWS` uses AWS Secrets Manager
-- `CLOUD_PROVIDER=AZURE` uses Azure Key Vault
-- empty/unset `CLOUD_PROVIDER` uses local-development mode
-
-Local-development mode treats secret-related environment variables as direct values so the template can run locally without external secret-manager dependencies.
-
-Typical current secret resolution:
-
-- OpenAI:
-  - direct value: `OPENAI_API_KEY`
-  - secret reference: `OPENAI_API_KEY_SECRET`
-- Anthropic:
-  - direct value: `ANTHROPICAI_API_KEY`
-  - secret reference: `ANTHROPICAI_API_KEY_SECRET`
-- Gemini:
-  - direct value: `GEMINIAI_API_KEY`
-  - secret reference: `GEMINIAI_API_KEY_SECRET`
-- Bedrock:
-  - direct value: `BEDROCK_AI_API_KEY`
-  - secret reference: `BEDROCK_AI_API_KEY_SECRET`
-- Microsoft Foundry:
-  - direct value: `MICROSOFT_FOUNDRY_AI_API_KEY`
-  - secret reference: `MICROSOFT_FOUNDRY_AI_API_KEY_SECRET`
-  - endpoint: `MICROSOFT_FOUNDRY_AI_ENDPOINT`
-
-## Startup and Validation
-
-App startup currently performs:
-
-1. configuration loading from `config/settings.py`
-2. logging configuration through `logging_utils.py`
-3. provider/config validation from `config/validators.py`
-   - validates that the selected provider exists in `models.yaml`
-   - resolves the selected provider credentials during startup
-4. workflow controller initialization through `workflow.py`
-5. LangSmith tracing initialization through `tracking.py` during FastAPI lifespan startup
-6. FastAPI app startup
-
-LangSmith tracing is controlled by `LANGSMITH_TRACING`.
-
-- If `LANGSMITH_TRACING=true`, startup requires valid LangSmith credentials.
-- If `LANGSMITH_TRACING=false`, startup continues with tracing disabled.
-
-LangSmith inputs:
-
-- `LANGSMITH_TRACING`
-- `LANGSMITH_API_KEY`
-- `LANGSMITH_API_KEY_SECRET`
-- `LANGSMITH_PROJECT`
-- `LANGSMITH_ENDPOINT`
-
-## Direct Invocation
-
-Use the workflow helpers if you want to invoke the template directly in Python:
-
-```python
-from latest_ai_development.main import _build_initial_state, get_graph
-
-graph = get_graph()
-result = graph.invoke(_build_initial_state(topic="Your Topic Here"))
-print(result["report"])
-```
-
-Or use the workflow facade:
-
-```python
-from latest_ai_development.workflow import LatestAiDevelopmentWorkflow
-
-workflow = LatestAiDevelopmentWorkflow()
-result = workflow.kickoff({"topic": "Your Topic Here"})
-print(result["report"])
-```
-
-## File Ownership
-
-These files are workflow-critical and should stay aligned:
-
-- `src/latest_ai_development/config/settings.py`
-- `src/latest_ai_development/config/models.yaml`
-- `src/latest_ai_development/config/graph_config.yaml`
-- `src/latest_ai_development/config/validators.py`
-- `src/latest_ai_development/graph/state.py`
 - `src/latest_ai_development/graph/graph_builder.py`
-- `src/latest_ai_development/main.py`
+- `src/latest_ai_development/nodes/agent_node_builder.py`
+- `src/latest_ai_development/tools/tool_registry.py`
 - `src/latest_ai_development/workflow.py`
-- `src/latest_ai_development/prompts/prompt_builder.py`
-- `src/latest_ai_development/nodes/orchestration_node_builder.py`
-- `src/latest_ai_development/nodes/research_node_builder.py`
-- `src/latest_ai_development/nodes/reporting_node_builder.py`
+- `src/latest_ai_development/main.py`
+- `src/latest_ai_development/llm/*`
+- `src/latest_ai_development/tracking.py`
+- `tests/test_template.py`
 
-## Output Persistence
+A change to these files requires a runtime capability that the current
+configuration contract cannot express.
 
-Report-file persistence is controlled by `execution.save_output` in `src/latest_ai_development/config/graph_config.yaml`.
+Do not generate per-workflow `AskRequest` or `AskResponse` models and do not
+hard-code `user_input` or `final_response` in the stable runtime files. Update
+the explicit typed classes and exported field constants in `graph/state.py`;
+the reusable API/workflow boundary discovers them automatically.
 
-Current default:
+## Adding An Agent
 
-- `save_output: false`
+1. Add the agent to `config/agents.yaml`.
+2. Add an agent node to `config/graph_config.yaml`.
+3. Put the complete prompt inline in the agent entry; legacy prompt-file
+   references remain supported when intentionally needed.
+4. Add direct or conditional transitions in `graph_config.yaml`.
+5. Declare agent input, internal, and output fields in the typed state classes
+   in `graph/state.py`.
 
-This default avoids write failures on deployments that run with `readOnlyRootFilesystem: true`.
+Agent nodes must use `node_type: agent` and reference an existing agent ID with
+`agent_name` (or `agent_id` when its display name differs). Do not
+create another node-builder class for standard LLM agents.
 
-If you enable file output:
+Use `output_field` for a single text result. Use `output_mapping` when a generated
+Pydantic response schema must populate multiple state fields, including fields
+consumed by conditional routing. Do not parse model-generated JSON manually.
 
-- point `OUTPUT_DIR` to a writable path such as a mounted volume or `/tmp/output`
-- do not assume `/app/output` is writable in production
+## Deterministic Nodes
 
-If report writing fails at runtime, the workflow logs a warning and still returns the API response instead of failing the request.
+Use deterministic nodes for input validation, normalization, routing-decision
+calculation, retry counters, policy gates, and final response shaping. Every
+deterministic node declares visible `operation_type`, `description`, and
+`metadata.parameters` plus exact `reads_state` and `writes_state` in
+`graph_config.yaml`.
 
-## Extension Guidance
+Implement every deterministic node as a direct function in `workflow_nodes.py`
+and register it under the exact graph node ID in `NODE_REGISTRY`. Register named
+routers in `ROUTER_REGISTRY`. The operation metadata describes intent and
+parameters for validation and UI display; it is never interpreted as executable
+Python. Do not put builder classes, factory methods, or Python import paths in
+graph YAML. Put all simple or complex behavior in the registered functions.
 
-When extending the template:
+Prompts describe outputs; graph configuration controls execution order.
 
-- update `config/graph_config.yaml` first when changing graph topology
-- add or change state fields in `graph/state.py` when the state contract changes
-- update prompt helpers for any new agent-backed node
-- keep node outputs aligned with shared state
-- only update `graph/graph_builder.py` if the generic config-driven compiler contract itself changes
-- update `main.py` request/response models if the external contract changes
-- keep any optional report persistence logic inside `workflow.py`
+## Execution And Persistence
 
-## Validation
+Use `ainvoke()` in async application paths. Keep the compiled graph and configured
+agents reusable across requests rather than rebuilding them during node execution.
+Enable a supported checkpointer in `graph_config.yaml` and always pass a stable
+`thread_id`; resume an interrupt with `Command(resume=...)` using that same ID.
 
-Recommended checks after edits:
+## Routing Rules
+
+- Use `edges` for unconditional transitions.
+- Use `conditional_edges` for mutually exclusive runtime branches.
+- Prefer `decision_field` plus `path_map`.
+- Use a custom `router` only when one state field cannot express the decision.
+- Use `command_destinations` when a node returns `Command(update=..., goto=...)`.
+- Use `send_destinations` with a custom router when it returns dynamic `Send`
+  fan-out instructions.
+- Do not configure more than one outgoing mechanism on a node: direct edges,
+  conditional edges, or `Command` destinations.
+- Every configured node must be reachable from `entry_point`.
+- Every reachable path must be able to terminate at `END`.
+- Every `end_nodes` entry must route only to `END`.
+
+Use `runtime.context["values"]` for per-invocation dependencies and settings that
+must not be persisted in graph state. Add defaults under `runtime_context` in
+`graph_config.yaml`; do not copy runtime context into `State`.
+
+## Tools
+
+Declare Python tool factories in `config/tools.yaml`, then assign tool names to
+agents. Keep MCP server definitions in `config/mcp.yaml` and reference server
+names through an agent's `mcp_servers` list. The generic runtime resolves Python
+tools by graph node ID. Do not patch individual agent-node builders or the
+registry for each tool assignment.
+
+Tool assignment is many-to-many. An agent's `tools` list may contain multiple
+tool names, and the same tool name may appear in multiple agents. Define each
+unique tool factory once in `tools.yaml`; the registry caches one runtime
+instance per tool name and reuses it wherever assigned. Preserve tool-list order
+and remove duplicate names within an individual agent configuration.
+
+Use `factory_kwargs` only for non-secret constructor values such as table scope
+or feature flags. Keep credentials in environment variables or the secrets
+manager. Optional description, connector, tags, and usage/non-usage guidelines
+should describe the generated tool without changing runtime wiring.
+
+MCP configuration is validated by this POC, but MCP client execution requires an
+adapter implementation and dependency. Until then, startup validation rejects
+non-empty `mcp_servers` assignments instead of silently ignoring them.
+
+Add direct and transitive runtime requirements to `pyproject.toml` when a
+generated tool imports them, then update `uv.lock` with `uv lock`.
+
+## Generated Change Budget
+
+An initial four-agent, two-tool workflow should normally touch 6-11 files. An
+ordinary additional agent should normally touch 3-4 files. Broad changes to API,
+workflow bootstrap, graph compilation, model fallback, or tracking require an
+explicit justification.
+
+The test suite is intentionally configuration-driven and contained in
+`tests/test_template.py`. Generated workflows must pass it without changing it.
+
+## Required Checks
 
 ```bash
-uv run --with pytest python -m pytest
-.venv/bin/python -m compileall src/latest_ai_development
+uv sync --all-extras
+uv run pytest -q
+uv run ruff check src tests
+uv run mypy src
+uv run python -m compileall -q src tests
+git diff --check
 ```
+
+Do not report implementation completion while any required check fails. Do not
+commit temporary `_work` directories, generated caches, or local output files.

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 
-import boto3
 from boto3.session import Session
 from botocore.exceptions import ClientError
 
@@ -24,7 +23,7 @@ class AWSSecretsManager:
             region_name=region_name,
         )
 
-    def get_secret(self, secret_name: str, secret_key: str | None = None):
+    def get_secret(self, secret_name: str, secret_key: str | None = None) -> str | None:
         """
         Retrieves a secret from AWS Secrets Manager.
         :param secret_name: The name of the secret in AWS Secrets Manager.
@@ -36,7 +35,9 @@ class AWSSecretsManager:
         except ClientError as exc:
             raise RuntimeError(f"Failed to fetch AWS secret '{secret_name}': {exc}") from exc
 
-        secret = response["SecretString"]
+        secret = response.get("SecretString")
+        if not isinstance(secret, str):
+            raise ValueError(f"AWS secret '{secret_name}' does not contain a string value")
 
         if secret_key:
             secret_dict = json.loads(secret)
@@ -54,9 +55,7 @@ class AzureKeyVaultSecretsManager:
         settings = get_settings()
         key_vault_url = settings.azure_key_vault_url
         if not key_vault_url:
-            raise ValueError(
-                "AZURE_KEY_VAULT_URL is required when CLOUD_PROVIDER is set to AZURE."
-            )
+            raise ValueError("AZURE_KEY_VAULT_URL is required when CLOUD_PROVIDER is set to AZURE.")
 
         # Import lazily so non-Azure environments do not require Azure SDK packages
         # just to import the template.
@@ -78,7 +77,7 @@ class AzureKeyVaultSecretsManager:
             credential=DefaultAzureCredential(additionally_allowed_tenants=["*"]),
         )
 
-    def get_secret(self, secret_name: str, secret_key: str | None = None):
+    def get_secret(self, secret_name: str, secret_key: str | None = None) -> str | None:
         """
         Retrieves a secret from Azure Key Vault.
         :param secret_name: The name of the secret in Azure Key Vault.
@@ -97,6 +96,9 @@ class AzureKeyVaultSecretsManager:
         except self._http_response_error as exc:
             raise ValueError(f"Azure Key Vault request failed: {exc}") from exc
 
+        if not isinstance(secret, str):
+            raise ValueError(f"Azure secret '{secret_name}' does not contain a string value")
+
         if secret_key:
             secret_dict = json.loads(secret)
             return secret_dict.get(secret_key)
@@ -113,6 +115,7 @@ class SecretsManager:
         settings = get_settings()
         self.cloud_provider = settings.cloud_provider.strip().upper()
 
+        self.manager: AWSSecretsManager | AzureKeyVaultSecretsManager | None
         if self.cloud_provider == "":
             self.manager = None
         elif self.cloud_provider == "AWS":
@@ -122,7 +125,7 @@ class SecretsManager:
         else:
             raise ValueError("CLOUD_PROVIDER must be empty, AWS, or AZURE.")
 
-    def get_secret(self, secret_name: str, secret_key: str | None = None):
+    def get_secret(self, secret_name: str, secret_key: str | None = None) -> str | None:
         """
         Retrieves a secret from the configured secret manager.
         In local mode, the provided secret name is returned as-is to support
@@ -139,4 +142,6 @@ class SecretsManager:
         if self.cloud_provider == "":
             return secret_name
 
+        if self.manager is None:  # pragma: no cover - guarded by cloud_provider
+            raise RuntimeError("Secret manager is not configured")
         return self.manager.get_secret(secret_name, secret_key)

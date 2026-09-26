@@ -34,8 +34,7 @@ def get_model_attempts(
 ) -> tuple[ModelAttempt, list[ModelAttempt]]:
     primary_attempt = model_attempt_from_settings(stage, primary_settings)
     fallback_attempts = [
-        model_attempt_from_settings(stage, settings)
-        for settings in fallback_settings
+        model_attempt_from_settings(stage, settings) for settings in fallback_settings
     ]
     return primary_attempt, fallback_attempts
 

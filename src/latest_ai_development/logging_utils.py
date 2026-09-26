@@ -48,9 +48,7 @@ def summarize_state_delta(
     after_keys = {str(key) for key in after.keys()}
 
     changed = sorted(
-        key
-        for key in before_keys & after_keys
-        if before_map.get(key) != after.get(key)
+        key for key in before_keys & after_keys if before_map.get(key) != after.get(key)
     )
 
     return {

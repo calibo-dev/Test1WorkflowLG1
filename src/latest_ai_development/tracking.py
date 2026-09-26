@@ -4,6 +4,7 @@ import logging
 import os
 from collections.abc import Callable, Mapping
 from functools import wraps
+from inspect import isawaitable, iscoroutinefunction
 from typing import Any
 
 from dotenv import load_dotenv
@@ -20,8 +21,11 @@ if (
     os.environ["LANGSMITH_TRACING"] = "false"
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
+traceable: Any
 try:
-    from langsmith import traceable
+    from langsmith import traceable as langsmith_traceable
+
+    traceable = langsmith_traceable
 except ImportError:  # pragma: no cover
     traceable = None
 
@@ -65,9 +69,10 @@ def _resolve_langsmith_api_key() -> str | None:
 
     secret_name = settings.langsmith_api_key_secret.strip()
     if not secret_name:
-        secret_name = os.getenv("LANGSMITH_API_KEY_SECRET", "").strip() or os.getenv(
-            "LANGCHAIN_API_KEY_SECRET", ""
-        ).strip()
+        secret_name = (
+            os.getenv("LANGSMITH_API_KEY_SECRET", "").strip()
+            or os.getenv("LANGCHAIN_API_KEY_SECRET", "").strip()
+        )
         if not secret_name:
             return None
 
@@ -104,15 +109,13 @@ def initialize_langsmith_tracing() -> None:
         os.environ["LANGSMITH_TRACING"] = "true"
         os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
-        project = settings.langsmith_project.strip() or os.getenv(
-            "LANGSMITH_PROJECT", ""
-        ).strip()
+        project = settings.langsmith_project.strip() or os.getenv("LANGSMITH_PROJECT", "").strip()
         if project:
             os.environ["LANGSMITH_PROJECT"] = project
 
-        endpoint = settings.langsmith_endpoint.strip() or os.getenv(
-            "LANGSMITH_ENDPOINT", ""
-        ).strip()
+        endpoint = (
+            settings.langsmith_endpoint.strip() or os.getenv("LANGSMITH_ENDPOINT", "").strip()
+        )
         if endpoint:
             os.environ["LANGSMITH_ENDPOINT"] = endpoint
 
@@ -136,36 +139,38 @@ def trace_node(node_id: str) -> Callable[[Callable[..., Any]], Callable[..., Any
     return _lazy_traceable(lambda: _node_trace_spec(node_id))
 
 
-def trace_node_execution(
+async def atrace_node_execution(
     node_id: str,
     invoke: Callable[[dict[str, Any]], Any],
     *,
     state: dict[str, Any],
 ) -> Any:
     @trace_node(node_id)
-    def _invoke(*, state: dict[str, Any]) -> Any:
-        return invoke(state)
+    async def _invoke(*, state: dict[str, Any]) -> Any:
+        result = invoke(state)
+        return await result if isawaitable(result) else result
 
-    return _invoke(state=state)
+    return await _invoke(state=state)
 
 
-def trace_workflow_execution(
-    invoke: Callable[[dict[str, Any]], Any],
+async def atrace_workflow_execution(
+    invoke: Callable[[Any], Any],
     *,
     flow_run_id: str,
     inputs: dict[str, Any],
-    initial_state: dict[str, Any],
+    initial_state: Any,
 ) -> Any:
     @trace_workflow()
-    def _invoke(
+    async def _invoke(
         *,
         flow_run_id: str,
         inputs: dict[str, Any],
-        initial_state: dict[str, Any],
+        initial_state: Any,
     ) -> Any:
-        return invoke(initial_state)
+        result = invoke(initial_state)
+        return await result if isawaitable(result) else result
 
-    return _invoke(
+    return await _invoke(
         flow_run_id=flow_run_id,
         inputs=inputs,
         initial_state=initial_state,
@@ -176,6 +181,14 @@ def _lazy_traceable(
     spec_factory: Callable[[], dict[str, Any]],
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        if iscoroutinefunction(func):
+            @wraps(func)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                traced_func = _traceable_from_spec(spec_factory())(func)
+                return await traced_func(*args, **kwargs)
+
+            return async_wrapper
+
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             traced_func = _traceable_from_spec(spec_factory())(func)
@@ -260,16 +273,13 @@ def _default_workflow_trace_spec() -> dict[str, Any]:
         },
         "input_fields": {
             "flow_run_id": "flow_run_id",
-            "topic": "inputs.topic",
-            "input_keys": {"path": "inputs", "transform": "keys"},
+            "user_input": "inputs.user_input",
             "initial_state_keys": {"path": "initial_state", "transform": "keys"},
         },
         "output_fields": {
-            "topic": "topic",
             "output_keys": {"path": ".", "transform": "keys"},
-            "has_report": {"path": "report", "transform": "bool"},
-            "report_chars": {"path": "report", "transform": "len"},
-            "research_result_chars": {"path": "research_result", "transform": "len"},
+            "has_final_response": {"path": "final_response", "transform": "bool"},
+            "final_response_chars": {"path": "final_response", "transform": "len"},
             "error_count": {"path": "errors", "transform": "len"},
         },
     }
@@ -286,14 +296,13 @@ def _default_node_trace_spec(node_id: str) -> dict[str, Any]:
             "node_id": node_id,
         },
         "input_fields": {
-            "topic": "state.topic",
+            "user_input": "state.user_input",
             "input_keys": {"path": "state", "transform": "keys"},
             "error_count": {"path": "state.errors", "transform": "len"},
         },
         "output_fields": {
             "output_keys": {"path": ".", "transform": "keys"},
-            "report_chars": {"path": "report", "transform": "len"},
-            "research_result_chars": {"path": "research_result", "transform": "len"},
+            "final_response_chars": {"path": "final_response", "transform": "len"},
             "error_count": {"path": "errors", "transform": "len"},
         },
     }
@@ -433,10 +442,7 @@ def _normalize_field_spec(value: Any) -> dict[str, Any]:
 
 def _build_field_processor(field_specs: Any) -> Callable[[Any], dict[str, Any]]:
     specs = field_specs if isinstance(field_specs, Mapping) else {}
-    normalized_specs = {
-        name: _normalize_field_spec(spec)
-        for name, spec in specs.items()
-    }
+    normalized_specs = {name: _normalize_field_spec(spec) for name, spec in specs.items()}
 
     def processor(payload: Any) -> dict[str, Any]:
         if not normalized_specs:
@@ -456,10 +462,10 @@ def _build_field_processor(field_specs: Any) -> Callable[[Any], dict[str, Any]]:
 
 
 __all__ = [
+    "atrace_node_execution",
+    "atrace_workflow_execution",
     "get_tracing_backend",
     "initialize_langsmith_tracing",
     "trace_node",
-    "trace_node_execution",
     "trace_workflow",
-    "trace_workflow_execution",
 ]

@@ -1,35 +1,50 @@
-from typing import TypedDict
-
-class AgentConfig(TypedDict, total=False):
-    """
-    Internal agent configuration carried in workflow state.
-    """
-
-    id: str
-    name: str
-    enabled: bool
-    role: str
-    tools: list[str]
+from copy import deepcopy
+from operator import add
+from typing import Annotated, Any, Required, TypedDict
 
 
-class State(TypedDict):
-    """
-    Shared LangGraph state passed between workflow nodes.
+class InputState(TypedDict, total=False):
+    """Public request fields accepted by the workflow."""
 
-    topic:
-        Original user input for the workflow.
-    agent_plan:
-        Internal agent definitions used by the POC workflow.
-    errors:
-        Validation or orchestration errors collected during execution.
-    research_result:
-        Intermediate output from the research node.
-    report:
-        Final output produced by the reporting node.
-    """
+    user_input: Required[str]
 
-    topic: str
-    agent_plan: list[AgentConfig]
-    errors: list[str]
-    research_result: str
-    report: str
+
+class OutputState(TypedDict, total=False):
+    """Public response fields returned by the workflow."""
+
+    final_response: str
+    errors: Annotated[list[str], add]
+
+
+class State(InputState, OutputState, total=False):
+    """Complete state shared by LangGraph nodes."""
+
+    normalized_feedback: str
+    validation_status: str
+    sentiment: str
+    confidence: str
+    sentiment_reason: str
+    clarification_question: str
+    urgency_score: int
+    policy_risk_score: int
+    draft_response: str
+    policy_guidance: str
+    human_decision: str
+
+
+INPUT_FIELDS = tuple(InputState.__annotations__)
+REQUIRED_INPUT_FIELDS = tuple(
+    field_name for field_name in INPUT_FIELDS if field_name in InputState.__required_keys__
+)
+OUTPUT_FIELDS = tuple(OutputState.__annotations__)
+
+_STATE_DEFAULTS: dict[str, Any] = {
+    "errors": [],
+    "urgency_score": 0,
+    "policy_risk_score": 0,
+}
+
+
+def state_defaults() -> dict[str, Any]:
+    """Return an isolated copy of workflow state defaults for one invocation."""
+    return deepcopy(_STATE_DEFAULTS)
