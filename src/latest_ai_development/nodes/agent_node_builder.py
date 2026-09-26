@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast, get_type_hints
@@ -85,7 +86,11 @@ def _build_response_format(
         str(output_field): (state_types.get(str(state_field), str), ...)
         for output_field, state_field in output_mapping.items()
     }
-    model_name = "".join(part.title() for part in agent_id.split("_")) + "Response"
+    name_parts = re.findall(r"[A-Za-z0-9]+", agent_id)
+    schema_name = "".join(part[:1].upper() + part[1:] for part in name_parts)
+    if not schema_name or schema_name[0].isdigit():
+        schema_name = f"Agent{schema_name}"
+    model_name = f"{schema_name}Response"
     return create_model(model_name, **fields)
 
 
